@@ -8,7 +8,11 @@ from continual_learning.constants import (
     ERROR_CORRECTION_TICKS,
     PROPAGATION_TICKS,
 )
-from continual_learning.network import create_network_state, step_network
+from continual_learning.network import (
+    create_network_state,
+    format_network_state,
+    step_network,
+)
 from continual_learning.types import (
     ExperimentOptions,
     LlmCaller,
@@ -42,34 +46,72 @@ def generate_mnist_samples(digits: list[int]) -> Iterator[tuple[str, int]]:
 def train_on_sample(
     state: NetworkState, features: str, target: int, call_llm: LlmCaller,
 ) -> NetworkState:
+    logger.debug(
+        "[experiment] train_on_sample START features=%s target=%d",
+        features, target,
+    )
     current = state
-    for _ in range(PROPAGATION_TICKS):
+    for tick in range(PROPAGATION_TICKS):
+        logger.debug(
+            "[experiment] train_on_sample PROPAGATION tick %d/%d features=%s",
+            tick + 1, PROPAGATION_TICKS, features,
+        )
         result = step_network(
             current,
             NetworkStepInput(raw_input=features, top_down_feedback="Evaluate"),
             call_llm,
         )
         current = result.state
+        logger.debug(
+            "[experiment] train_on_sample PROPAGATION tick %d/%d prediction=%s",
+            tick + 1, PROPAGATION_TICKS, result.prediction,
+        )
 
     prediction = result.prediction  # noqa: F821 — `result` is always assigned
+    logger.debug(
+        "[experiment] train_on_sample prediction=%s target=%d match=%s",
+        prediction, target, prediction == str(target),
+    )
     if prediction != str(target):
         feedback = f"Error: Target: {target}"
-        for _ in range(ERROR_CORRECTION_TICKS):
+        logger.debug(
+            "[experiment] train_on_sample ERROR CORRECTION needed feedback=%s",
+            feedback,
+        )
+        for tick in range(ERROR_CORRECTION_TICKS):
+            logger.debug(
+                "[experiment] train_on_sample ERROR_CORRECTION tick %d/%d features=%s feedback=%s",
+                tick + 1, ERROR_CORRECTION_TICKS, features, feedback,
+            )
             result = step_network(
                 current,
                 NetworkStepInput(raw_input=features, top_down_feedback=feedback),
                 call_llm,
             )
             current = result.state
+            logger.debug(
+                "[experiment] train_on_sample ERROR_CORRECTION tick %d/%d prediction=%s",
+                tick + 1, ERROR_CORRECTION_TICKS, result.prediction,
+            )
+    logger.debug(
+        "[experiment] train_on_sample END features=%s target=%d\n"
+        "  NETWORK STATE:\n%s",
+        features, target, format_network_state(current),
+    )
     return current
 
 
 def evaluate_sample(
     state: NetworkState, features: str, call_llm: LlmCaller,
 ) -> tuple[NetworkState, str]:
+    logger.debug("[experiment] evaluate_sample START features=%s", features)
     current = state
     prediction = "unknown"
-    for _ in range(PROPAGATION_TICKS):
+    for tick in range(PROPAGATION_TICKS):
+        logger.debug(
+            "[experiment] evaluate_sample PROPAGATION tick %d/%d features=%s",
+            tick + 1, PROPAGATION_TICKS, features,
+        )
         result = step_network(
             current,
             NetworkStepInput(raw_input=features, top_down_feedback="Evaluate"),
@@ -77,6 +119,14 @@ def evaluate_sample(
         )
         current = result.state
         prediction = result.prediction
+        logger.debug(
+            "[experiment] evaluate_sample PROPAGATION tick %d/%d prediction=%s",
+            tick + 1, PROPAGATION_TICKS, prediction,
+        )
+    logger.debug(
+        "[experiment] evaluate_sample END features=%s prediction=%s",
+        features, prediction,
+    )
     return current, prediction
 
 
@@ -91,8 +141,16 @@ def run_training_phase(
     phase_name: str,
 ) -> NetworkState:
     logger.info("[experiment] === %s ===", phase_name)
+    logger.debug(
+        "[experiment] %s START STATE:\n%s",
+        phase_name, format_network_state(state),
+    )
     current = state
     for features, target in generate_mnist_samples(digits):
+        logger.debug(
+            "[experiment] training sample features=%s target=%d",
+            features, target,
+        )
         current = train_on_sample(current, features, target, call_llm)
         _, prediction = evaluate_sample(current, features, call_llm)
         status = "correct" if prediction == str(target) else "wrong"
@@ -100,6 +158,10 @@ def run_training_phase(
             "[experiment] Train | Input: '%s' | Target: %d | Pred: %s | %s",
             features, target, prediction, status,
         )
+    logger.debug(
+        "[experiment] %s END STATE:\n%s",
+        phase_name, format_network_state(current),
+    )
     return current
 
 
@@ -110,10 +172,18 @@ def run_evaluation_phase(
     phase_name: str,
 ) -> NetworkState:
     logger.info("[experiment] === %s ===", phase_name)
+    logger.debug(
+        "[experiment] %s START STATE:\n%s",
+        phase_name, format_network_state(state),
+    )
     current = state
     correct = 0
     total = 0
     for features, target in generate_mnist_samples(digits):
+        logger.debug(
+            "[experiment] evaluating sample features=%s target=%d",
+            features, target,
+        )
         current, prediction = evaluate_sample(current, features, call_llm)
         is_correct = prediction == str(target)
         if is_correct:
@@ -125,6 +195,10 @@ def run_evaluation_phase(
             features, target, prediction, status,
         )
     logger.info("[experiment] Accuracy: %d/%d", correct, total)
+    logger.debug(
+        "[experiment] %s END STATE:\n%s",
+        phase_name, format_network_state(current),
+    )
     return current
 
 
@@ -133,6 +207,10 @@ def run_topology_phase(
     call_llm: LlmCaller,
 ) -> None:
     logger.info("[experiment] === Phase 4: Dynamic Topology (Neuron Removal) ===")
+    logger.debug(
+        "[experiment] topology phase STATE BEFORE:\n%s",
+        format_network_state(state),
+    )
     layer_0 = state.layers[0]
     if len(layer_0.neurons) < 2:
         logger.info("[experiment] Layer 0 has fewer than 2 neurons, skipping removal")
@@ -148,6 +226,10 @@ def run_topology_phase(
         activations=reduced_activations,
         feedbacks=reduced_feedbacks,
     )
+    logger.debug(
+        "[experiment] topology phase REDUCED STATE:\n%s",
+        format_network_state(reduced_state),
+    )
 
     result = step_network(
         reduced_state,
@@ -156,6 +238,10 @@ def run_topology_phase(
     )
     logger.info(
         "[experiment] Post-damage prediction: %s (no shape crash!)", result.prediction,
+    )
+    logger.debug(
+        "[experiment] topology phase STATE AFTER:\n%s",
+        format_network_state(result.state),
     )
 
 
