@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, replace
 
-from continual_learning.constants import EMPTY_SIGNAL
+from continual_learning.constants import (
+    EMPTY_SIGNAL,
+    RANDOM_STATE_SEED,
+)
 from continual_learning.neuron import apply_neuron_response, build_neuron_prompt
+from continual_learning.state import build_random_state_text
 from continual_learning.types import (
     BatchLlmCaller,
     LayerState,
@@ -117,6 +122,7 @@ def collect_all_requests(
                 top_down=build_layer_top_down(
                     state, layer_index, step_input.top_down_feedback,
                 ),
+                allow_state_update=step_input.allow_state_update,
             ),
         )
         all_requests.extend(collect_requests_for_layer(layer_input))
@@ -179,17 +185,28 @@ def apply_all_results(
     return NetworkStepResult(state=new_state, prediction=prediction)
 
 
+def build_random_neuron_state(
+    *, name: str, generator: random.Random,
+) -> NeuronState:
+    return NeuronState(name=name, state=build_random_state_text(generator=generator))
+
+
 # ---------------------------------------------------------------------------
 # Network operations
 # ---------------------------------------------------------------------------
 
 def create_network_state(layer_sizes: tuple[int, ...]) -> NetworkState:
+    generator = random.Random(RANDOM_STATE_SEED)
     layers: list[LayerState] = []
     activations: list[tuple[str, ...]] = []
     feedbacks: list[tuple[str, ...]] = []
     for layer_index, size in enumerate(layer_sizes):
         neurons = tuple(
-            NeuronState(name=f"L{layer_index}_N{i}") for i in range(size)
+            build_random_neuron_state(
+                name=f"L{layer_index}_N{i}",
+                generator=generator,
+            )
+            for i in range(size)
         )
         layers.append(LayerState(neurons=neurons))
         activations.append(tuple(EMPTY_SIGNAL for _ in range(size)))
@@ -205,6 +222,32 @@ def create_network_state(layer_sizes: tuple[int, ...]) -> NetworkState:
         layer_sizes, format_network_state(state),
     )
     return state
+
+
+def reset_network_traces(state: NetworkState) -> NetworkState:
+    layers = tuple(
+        LayerState(
+            neurons=tuple(replace(neuron, last_output=EMPTY_SIGNAL) for neuron in layer.neurons),
+        )
+        for layer in state.layers
+    )
+    activations = tuple(
+        tuple(EMPTY_SIGNAL for _ in layer.neurons) for layer in layers
+    )
+    feedbacks = tuple(
+        tuple(EMPTY_SIGNAL for _ in layer.neurons) for layer in layers
+    )
+    reset_state = NetworkState(
+        layers=layers,
+        activations=activations,
+        feedbacks=feedbacks,
+    )
+    logger.debug(
+        "[network] reset_network_traces\n"
+        "  RESET STATE:\n%s",
+        format_network_state(reset_state),
+    )
+    return reset_state
 
 
 def step_network(

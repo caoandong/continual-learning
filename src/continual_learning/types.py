@@ -24,6 +24,7 @@ class NeuronResponse:
 class NeuronStepInput:
     bottom_up: str
     top_down: str
+    allow_state_update: bool = True
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class NetworkState:
 class NetworkStepInput:
     raw_input: str
     top_down_feedback: str
+    allow_state_update: bool = True
 
 
 @dataclass(frozen=True)

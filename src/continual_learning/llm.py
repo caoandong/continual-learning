@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import functools
-import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from continual_learning.constants import (
-    DEFAULT_TEMPERATURE,
-    EMPTY_SIGNAL,
-    NEURON_SYSTEM_PROMPT,
+from continual_learning.constants import DEFAULT_TEMPERATURE, NEURON_SYSTEM_PROMPT
+from continual_learning.environment import load_environment_file
+from continual_learning.state import (
+    StateEvolutionInput,
+    StructuredNeuronResponseModel,
+    debug_state_summary,
+    parse_state_text,
+    readout_response,
+    serialize_state,
+    sanitize_state_update,
+    state_response,
+    parsed_state_from_model,
 )
 from continual_learning.types import (
     BatchLlmCaller,
@@ -20,10 +27,6 @@ from continual_learning.types import (
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Prompt parsing helpers
-# ---------------------------------------------------------------------------
 
 def extract_prompt_section(prompt: str, section_start: str, section_end: str) -> str:
     pattern = re.escape(section_start) + r"\s*(.*?)\s*" + re.escape(section_end)
@@ -44,124 +47,156 @@ def extract_prompt_field(prompt: str, field_name: str) -> str:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Mock LLM — deterministic rule engine
-# ---------------------------------------------------------------------------
-
-def learn_new_rule(state: str, bottom_up: str, top_down: str) -> NeuronResponse:
-    target = top_down.split("Target:")[1].strip()
-    rule = f"[If '{bottom_up}' -> '{target}']"
-    new_state = state
-    if rule not in new_state:
-        new_state = (new_state + " " + rule).strip()
-        logger.debug(
-            "[llm] learn_new_rule APPENDED rule=%s\n"
-            "  old_state=%s\n"
-            "  new_state=%s",
-            rule, state, new_state,
-        )
-    else:
-        logger.debug("[llm] learn_new_rule DUPLICATE rule=%s (no change)", rule)
+def response_from_state_evolution(input_data: StateEvolutionInput) -> NeuronResponse:
+    new_state, activation_up, feedback_down = state_response(input_data)
     response = NeuronResponse(
         new_state=new_state,
-        activation_up=target,
-        feedback_down=f"Error: Needs features for {target}",
+        activation_up=activation_up,
+        feedback_down=feedback_down,
     )
     logger.debug(
-        "[llm] learn_new_rule RESPONSE\n"
-        "  new_state=%s\n"
+        "[llm] response_from_state_evolution\n"
+        "  previous_state=%s\n"
+        "  next_state=%s\n"
         "  activation_up=%s\n"
         "  feedback_down=%s",
-        response.new_state, response.activation_up, response.feedback_down,
+        debug_state_summary(input_data.previous_state_text),
+        debug_state_summary(response.new_state),
+        response.activation_up,
+        response.feedback_down,
     )
     return response
 
 
-def compress_to_word(text: str) -> str:
-    words = text.split()
-    return words[0].lower().rstrip(",") if words else "unknown"
+def response_from_state_readout(
+    *,
+    state_text: str,
+    bottom_up: str,
+    top_down: str,
+    preferred_activation: str = "",
+    preferred_feedback: str = "",
+) -> NeuronResponse:
+    state = parse_state_text(state_text)
+    activation_up, feedback_down = readout_response(
+        state=state,
+        bottom_up=bottom_up,
+        top_down=top_down,
+        preferred_activation=preferred_activation,
+        preferred_feedback=preferred_feedback,
+    )
+    return NeuronResponse(
+        new_state=serialize_state(state),
+        activation_up=activation_up,
+        feedback_down=feedback_down,
+    )
+
+
+def learn_new_rule(state: str, bottom_up: str, top_down: str) -> NeuronResponse:
+    return response_from_state_evolution(
+        StateEvolutionInput(
+            previous_state_text=state,
+            bottom_up=bottom_up,
+            top_down=top_down,
+        ),
+    )
 
 
 def apply_existing_rules(state: str, bottom_up: str) -> NeuronResponse:
-    match = re.search(r"\[If '" + re.escape(bottom_up) + r"' -> '(.*?)'\]", state)
-    if match:
-        activation = match.group(1)
-        logger.debug(
-            "[llm] apply_existing_rules MATCHED '%s' -> '%s' in state=%s",
-            bottom_up, activation, state,
-        )
-    elif bottom_up != EMPTY_SIGNAL:
-        activation = compress_to_word(bottom_up)
-        logger.debug(
-            "[llm] apply_existing_rules NO MATCH for '%s' -> compressed=%s",
-            bottom_up, activation,
-        )
-    else:
-        activation = "unknown"
-        logger.debug("[llm] apply_existing_rules EMPTY_SIGNAL input -> unknown")
-    response = NeuronResponse(
-        new_state=state,
-        activation_up=activation,
-        feedback_down="none",
+    return response_from_state_evolution(
+        StateEvolutionInput(
+            previous_state_text=state,
+            bottom_up=bottom_up,
+            top_down="Evaluate",
+        ),
     )
-    logger.debug(
-        "[llm] apply_existing_rules RESPONSE\n"
-        "  new_state=%s\n"
-        "  activation_up=%s\n"
-        "  feedback_down=%s",
-        response.new_state, response.activation_up, response.feedback_down,
-    )
-    return response
 
 
 def call_llm_mock(prompt: str) -> NeuronResponse:
     logger.debug("[llm] call_llm_mock FULL PROMPT:\n%s", prompt)
     state = extract_prompt_section(
-        prompt, "CURRENT STATE (Tokens as Weights):", "INPUTS:",
+        prompt, "CURRENT STATE (Persistent Memory JSON):", "INPUTS:",
     )
     bottom_up = extract_prompt_field(prompt, "Bottom-up context")
     top_down = extract_prompt_field(prompt, "Top-down feedback")
-
+    state_update_mode = extract_prompt_field(prompt, "State update mode")
     logger.debug(
         "[llm] call_llm_mock PARSED\n"
         "  state=%s\n"
         "  bottom_up=%s\n"
-        "  top_down=%s",
-        state, bottom_up, top_down,
+        "  top_down=%s\n"
+        "  state_update_mode=%s",
+        debug_state_summary(state), bottom_up, top_down, state_update_mode,
+    )
+    if state_update_mode == "read_only":
+        return response_from_state_readout(
+            state_text=state,
+            bottom_up=bottom_up,
+            top_down=top_down,
+        )
+    return response_from_state_evolution(
+        StateEvolutionInput(
+            previous_state_text=state,
+            bottom_up=bottom_up,
+            top_down=top_down,
+        ),
     )
 
-    if "Error" in top_down and "Target:" in top_down:
-        logger.debug("[llm] call_llm_mock BRANCH -> learn_new_rule")
-        return learn_new_rule(state, bottom_up, top_down)
-    logger.debug("[llm] call_llm_mock BRANCH -> apply_existing_rules")
-    return apply_existing_rules(state, bottom_up)
 
-
-# ---------------------------------------------------------------------------
-# Real LLM via litellm
-# ---------------------------------------------------------------------------
-
-def parse_llm_json(content: str) -> NeuronResponse:
-    logger.debug("[llm] parse_llm_json raw content:\n%s", content)
-    data = json.loads(content)
-    response = NeuronResponse(
-        new_state=data.get("new_state", ""),
-        activation_up=data.get("activation_up", "unknown"),
-        feedback_down=data.get("feedback_down", "none"),
+def response_from_structured_output(
+    *,
+    previous_state_text: str,
+    parsed: StructuredNeuronResponseModel,
+    bottom_up: str,
+    top_down: str,
+    allow_state_update: bool,
+) -> NeuronResponse:
+    previous_state = parse_state_text(previous_state_text)
+    state = previous_state
+    if allow_state_update:
+        proposed_state = parsed_state_from_model(parsed.new_state)
+        state = sanitize_state_update(
+            previous_state=previous_state,
+            proposed_state=proposed_state,
+            top_down=top_down,
+        )
+    activation_up, feedback_down = readout_response(
+        state=state,
+        bottom_up=bottom_up,
+        top_down=top_down,
+        preferred_activation=parsed.activation_up,
+        preferred_feedback=parsed.feedback_down,
     )
-    logger.debug(
-        "[llm] parse_llm_json PARSED\n"
-        "  new_state=%s\n"
-        "  activation_up=%s\n"
-        "  feedback_down=%s",
-        response.new_state, response.activation_up, response.feedback_down,
+    return NeuronResponse(
+        new_state=serialize_state(state),
+        activation_up=activation_up,
+        feedback_down=feedback_down,
     )
-    return response
+
+
+def parse_structured_message(message: object) -> StructuredNeuronResponseModel:
+    parsed = getattr(message, "parsed", None)
+    if isinstance(parsed, StructuredNeuronResponseModel):
+        return parsed
+
+    content = getattr(message, "content", None)
+    if isinstance(content, StructuredNeuronResponseModel):
+        return content
+    if isinstance(content, str):
+        return StructuredNeuronResponseModel.model_validate_json(content)
+    if isinstance(content, dict):
+        return StructuredNeuronResponseModel.model_validate(content)
+    raise TypeError(f"Unsupported LiteLLM message payload: {type(content)!r}")
 
 
 def call_llm_litellm(prompt: str, *, model: str) -> NeuronResponse:
     import litellm  # noqa: PLC0415 — deferred to avoid import cost when using mock
 
+    state = extract_prompt_section(
+        prompt, "CURRENT STATE (Persistent Memory JSON):", "INPUTS:",
+    )
+    bottom_up = extract_prompt_field(prompt, "Bottom-up context")
+    top_down = extract_prompt_field(prompt, "Top-down feedback")
+    allow_state_update = extract_prompt_field(prompt, "State update mode") != "read_only"
     logger.debug(
         "[llm] call_llm_litellm model=%s FULL PROMPT:\n%s",
         model, prompt,
@@ -173,38 +208,37 @@ def call_llm_litellm(prompt: str, *, model: str) -> NeuronResponse:
             {"role": "user", "content": prompt},
         ],
         temperature=DEFAULT_TEMPERATURE,
-        response_format={"type": "json_object"},
+        response_format=StructuredNeuronResponseModel,
     )
-    content = response.choices[0].message.content  # type: ignore[union-attr]
-    logger.debug("[llm] call_llm_litellm RAW RESPONSE:\n%s", content)
-    return parse_llm_json(content)
+    message = response.choices[0].message  # type: ignore[union-attr]
+    parsed = parse_structured_message(message)
+    logger.debug("[llm] call_llm_litellm PARSED RESPONSE:\n%s", parsed.model_dump_json())
+    return response_from_structured_output(
+        previous_state_text=state,
+        parsed=parsed,
+        bottom_up=bottom_up,
+        top_down=top_down,
+        allow_state_update=allow_state_update,
+    )
 
-
-# ---------------------------------------------------------------------------
-# Factory
-# ---------------------------------------------------------------------------
 
 def create_llm_caller(options: ExperimentOptions) -> LlmCaller:
     if options.use_mock:
         logger.info("[llm] Using mock LLM")
         return call_llm_mock
+    load_environment_file()
     logger.info("[llm] Using litellm with model=%s", options.model)
     return functools.partial(call_llm_litellm, model=options.model)
 
 
-# ---------------------------------------------------------------------------
-# Batch execution
-# ---------------------------------------------------------------------------
-
 def call_llm_batch_threaded(
     prompts: tuple[str, ...], call_llm: LlmCaller,
 ) -> tuple[NeuronResponse, ...]:
-    """Execute all LLM calls in parallel via ONE ThreadPoolExecutor."""
     if not prompts:
         return ()
     with ThreadPoolExecutor(max_workers=len(prompts)) as executor:
-        futures = [executor.submit(call_llm, p) for p in prompts]
-        return tuple(f.result() for f in futures)
+        futures = [executor.submit(call_llm, prompt) for prompt in prompts]
+        return tuple(future.result() for future in futures)
 
 
 def create_batch_llm_caller(options: ExperimentOptions) -> BatchLlmCaller:

@@ -18,21 +18,44 @@ import sys
 from collections.abc import Sequence
 
 from continual_learning.constants import DEFAULT_LAYER_SIZES, DEFAULT_MODEL
-from continual_learning.experiment import (
-    DIGIT_FEATURES,
-    evaluate_sample,
-    train_on_sample,
-)
-from continual_learning.llm import create_llm_caller
+from continual_learning.experiment import evaluate_sample, train_on_sample
+from continual_learning.llm import create_batch_llm_caller
 from continual_learning.network import create_network_state
 from continual_learning.types import (
+    BatchLlmCaller,
     ExperimentOptions,
     LayerState,
-    LlmCaller,
     NetworkState,
 )
 
 logger = logging.getLogger(__name__)
+
+DIGIT_FEATURES: dict[int, str] = {
+    0: "round closed loop",
+    1: "straight vertical line",
+    2: "top curve diagonal flat bottom",
+}
+
+DIGIT_VARIANTS: dict[int, tuple[str, ...]] = {
+    0: (
+        DIGIT_FEATURES[0],
+        "closed round loop",
+        "loop closed round",
+        "round loop closed",
+    ),
+    1: (
+        DIGIT_FEATURES[1],
+        "vertical straight line",
+        "line straight vertical",
+        "straight line vertical",
+    ),
+    2: (
+        DIGIT_FEATURES[2],
+        "flat bottom diagonal curve top",
+        "top flat curve bottom diagonal",
+        "curve top diagonal flat bottom",
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -56,20 +79,23 @@ def configure_logging(*, verbose: bool) -> None:
 
 
 def evaluate_digits(
-    state: NetworkState, digits: Sequence[int], call_llm: LlmCaller,
+    state: NetworkState, digits: Sequence[int], call_llm_batch: BatchLlmCaller,
 ) -> tuple[NetworkState, int, int]:
     correct = 0
     total = 0
     current = state
     for digit in digits:
-        features = DIGIT_FEATURES[digit]
-        current, prediction = evaluate_sample(current, features, call_llm)
-        is_correct = prediction == str(digit)
-        if is_correct:
-            correct += 1
-        total += 1
-        status = "correct" if is_correct else "WRONG"
-        logger.info("  digit %d | pred: %-12s | %s", digit, prediction, status)
+        for features in DIGIT_VARIANTS.get(digit, (DIGIT_FEATURES[digit],)):
+            current, prediction = evaluate_sample(current, features, call_llm_batch)
+            is_correct = prediction == f"{digit}"
+            if is_correct:
+                correct += 1
+            total += 1
+            status = "correct" if is_correct else "WRONG"
+            logger.info(
+                "  digit %d | input: %-36s | pred: %-12s | %s",
+                digit, features, prediction, status,
+            )
     return current, correct, total
 
 
@@ -108,10 +134,13 @@ def run_test(
     digits: list[int],
     rounds: int,
     layer_sizes: tuple[int, ...],
-    call_llm: LlmCaller,
+    call_llm_batch: BatchLlmCaller,
 ) -> None:
     state = create_network_state(layer_sizes)
     logger.info("Network: layers=%s  digits=%s  rounds=%d", layer_sizes, digits, rounds)
+    logger.info("=== Initial evaluation on all requested digit variants ===")
+    _, correct, total = evaluate_digits(state, digits, call_llm_batch)
+    logger.info("  initial accuracy: %d/%d", correct, total)
 
     learned_so_far: list[int] = []
 
@@ -121,10 +150,11 @@ def run_test(
         logger.info("--- Training on digit %d (%d rounds) ---", digit, rounds)
 
         features = DIGIT_FEATURES[digit]
+        label = f"{digit}"
         for round_number in range(1, rounds + 1):
-            state = train_on_sample(state, features, digit, call_llm)
-            _, prediction = evaluate_sample(state, features, call_llm)
-            status = "correct" if prediction == str(digit) else "wrong"
+            state = train_on_sample(state, features, label, call_llm_batch)
+            _, prediction = evaluate_sample(state, features, call_llm_batch)
+            status = "correct" if prediction == label else "wrong"
             logger.info(
                 "  round %d/%d | pred: %-12s | %s",
                 round_number, rounds, prediction, status,
@@ -132,12 +162,12 @@ def run_test(
 
         # Evaluate all learned digits after each new digit is introduced
         logger.info("--- Evaluation on digits %s ---", learned_so_far)
-        state, correct, total = evaluate_digits(state, learned_so_far, call_llm)
+        state, correct, total = evaluate_digits(state, learned_so_far, call_llm_batch)
         logger.info("  accuracy: %d/%d", correct, total)
 
     # Final full evaluation
     logger.info("=== Final evaluation on all digits %s ===", digits)
-    state, correct, total = evaluate_digits(state, digits, call_llm)
+    state, correct, total = evaluate_digits(state, digits, call_llm_batch)
     logger.info("  final accuracy: %d/%d", correct, total)
 
     # Neuron state inspection
@@ -148,9 +178,9 @@ def run_test(
     if len(state.layers[0].neurons) >= 2:
         logger.info("=== Topology test: removing L0_N0 ===")
         damaged = remove_neuron(state, layer_index=0, neuron_index=0)
-        _, prediction = evaluate_sample(damaged, DIGIT_FEATURES[digits[0]], call_llm)
+        _, prediction = evaluate_sample(damaged, DIGIT_VARIANTS[digits[0]][-1], call_llm_batch)
         logger.info(
-            "  post-damage prediction for digit %d: %s (no crash)",
+            "  post-damage prediction for digit %d variant: %s (no crash)",
             digits[0], prediction,
         )
 
@@ -200,8 +230,8 @@ def main() -> None:
         model=args.model, use_mock=use_mock,
         layer_sizes=args.layer_sizes, verbose=args.verbose,
     )
-    call_llm = create_llm_caller(options)
-    run_test(args.digits, args.rounds, args.layer_sizes, call_llm)
+    call_llm_batch = create_batch_llm_caller(options)
+    run_test(args.digits, args.rounds, args.layer_sizes, call_llm_batch)
 
 
 if __name__ == "__main__":

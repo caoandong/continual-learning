@@ -1,42 +1,147 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from dataclasses import dataclass
 
 from continual_learning.constants import (
-    DEFAULT_LAYER_SIZES,
     ERROR_CORRECTION_TICKS,
+    MAX_CORRECTION_PASSES,
     PROPAGATION_TICKS,
+    SETTLING_BUFFER_TICKS,
 )
 from continual_learning.network import (
-    create_network_state,
     format_network_state,
+    reset_network_traces,
     step_network,
 )
 from continual_learning.types import (
     BatchLlmCaller,
-    ExperimentOptions,
-    LayerState,
     NetworkState,
     NetworkStepInput,
 )
 
 logger = logging.getLogger(__name__)
 
-DIGIT_FEATURES: dict[int, str] = {
-    0: "Round closed loop",
-    1: "Straight vertical line",
-    2: "Top curve, diagonal, flat bottom",
-}
+
+@dataclass(frozen=True)
+class PhaseResult:
+    state: NetworkState
+    prediction: str
+    ticks: int
 
 
-# ---------------------------------------------------------------------------
-# Sample generation
-# ---------------------------------------------------------------------------
+def propagation_tick_count(state: NetworkState) -> int:
+    return max(PROPAGATION_TICKS, len(state.layers))
 
-def generate_mnist_samples(digits: list[int]) -> Iterator[tuple[str, int]]:
-    for digit in digits:
-        yield DIGIT_FEATURES[digit], digit
+
+def correction_tick_count(state: NetworkState) -> int:
+    return max(ERROR_CORRECTION_TICKS, len(state.layers))
+
+
+def traces_are_stable(previous: NetworkState, current: NetworkState) -> bool:
+    return (
+        previous.activations == current.activations
+        and previous.feedbacks == current.feedbacks
+    )
+
+
+def settle_phase(
+    state: NetworkState,
+    *,
+    features: str,
+    feedback: str,
+    call_llm_batch: BatchLlmCaller,
+    tick_budget: int,
+    log_prefix: str,
+) -> PhaseResult:
+    current = state
+    minimum_ticks = len(state.layers)
+    for tick in range(tick_budget + SETTLING_BUFFER_TICKS):
+        result = step_network(
+            current,
+            NetworkStepInput(
+                raw_input=features,
+                top_down_feedback=feedback,
+                allow_state_update=False,
+            ),
+            call_llm_batch,
+        )
+        next_state = result.state
+        stabilized = (
+            tick + 1 >= minimum_ticks
+            and traces_are_stable(current, next_state)
+        )
+        logger.debug(
+            "[experiment] %s SETTLE tick %d/%d features=%s feedback=%s prediction=%s stabilized=%s",
+            log_prefix,
+            tick + 1,
+            tick_budget + SETTLING_BUFFER_TICKS,
+            features,
+            feedback,
+            result.prediction,
+            stabilized,
+        )
+        current = next_state
+        if stabilized:
+            return PhaseResult(
+                state=current,
+                prediction=result.prediction,
+                ticks=tick + 1,
+            )
+    return PhaseResult(
+        state=current,
+        prediction=result.prediction,
+        ticks=tick_budget + SETTLING_BUFFER_TICKS,
+    )
+
+
+def commit_phase(
+    state: NetworkState,
+    *,
+    features: str,
+    feedback: str,
+    call_llm_batch: BatchLlmCaller,
+    log_prefix: str,
+) -> PhaseResult:
+    result = step_network(
+        state,
+        NetworkStepInput(
+            raw_input=features,
+            top_down_feedback=feedback,
+            allow_state_update=True,
+        ),
+        call_llm_batch,
+    )
+    logger.debug(
+        "[experiment] %s COMMIT features=%s feedback=%s prediction=%s",
+        log_prefix,
+        features,
+        feedback,
+        result.prediction,
+    )
+    return PhaseResult(
+        state=result.state,
+        prediction=result.prediction,
+        ticks=1,
+    )
+
+
+def predict_from_state(
+    state: NetworkState,
+    *,
+    features: str,
+    call_llm_batch: BatchLlmCaller,
+    log_prefix: str,
+) -> str:
+    settled = settle_phase(
+        reset_network_traces(state),
+        features=features,
+        feedback="Evaluate",
+        call_llm_batch=call_llm_batch,
+        tick_budget=propagation_tick_count(state),
+        log_prefix=log_prefix,
+    )
+    return settled.prediction
 
 
 # ---------------------------------------------------------------------------
@@ -44,59 +149,78 @@ def generate_mnist_samples(digits: list[int]) -> Iterator[tuple[str, int]]:
 # ---------------------------------------------------------------------------
 
 def train_on_sample(
-    state: NetworkState, features: str, target: int, call_llm_batch: BatchLlmCaller,
+    state: NetworkState, features: str, target_label: str, call_llm_batch: BatchLlmCaller,
 ) -> NetworkState:
     logger.debug(
-        "[experiment] train_on_sample START features=%s target=%d",
-        features, target,
+        "[experiment] train_on_sample START features=%s target=%s",
+        features, target_label,
     )
-    current = state
-    for tick in range(PROPAGATION_TICKS):
-        logger.debug(
-            "[experiment] train_on_sample PROPAGATION tick %d/%d features=%s",
-            tick + 1, PROPAGATION_TICKS, features,
-        )
-        result = step_network(
-            current,
-            NetworkStepInput(raw_input=features, top_down_feedback="Evaluate"),
-            call_llm_batch,
-        )
-        current = result.state
-        logger.debug(
-            "[experiment] train_on_sample PROPAGATION tick %d/%d prediction=%s",
-            tick + 1, PROPAGATION_TICKS, result.prediction,
-        )
-
-    prediction = result.prediction  # noqa: F821 — `result` is always assigned
+    current = reset_network_traces(state)
+    propagation = settle_phase(
+        current,
+        features=features,
+        feedback="Evaluate",
+        call_llm_batch=call_llm_batch,
+        tick_budget=propagation_tick_count(current),
+        log_prefix="train_on_sample PROPAGATION",
+    )
+    current = commit_phase(
+        propagation.state,
+        features=features,
+        feedback="Evaluate",
+        call_llm_batch=call_llm_batch,
+        log_prefix="train_on_sample PROPAGATION",
+    ).state
+    prediction = predict_from_state(
+        current,
+        features=features,
+        call_llm_batch=call_llm_batch,
+        log_prefix="train_on_sample VERIFY",
+    )
     logger.debug(
-        "[experiment] train_on_sample prediction=%s target=%d match=%s",
-        prediction, target, prediction == str(target),
+        "[experiment] train_on_sample prediction=%s target=%s match=%s",
+        prediction, target_label, prediction == target_label,
     )
-    if prediction != str(target):
-        feedback = f"Error: Target: {target}"
+    feedback = f"Error: Target: {target_label}"
+    correction_pass = 0
+    while prediction != target_label and correction_pass < MAX_CORRECTION_PASSES:
+        correction_pass += 1
         logger.debug(
-            "[experiment] train_on_sample ERROR CORRECTION needed feedback=%s",
+            "[experiment] train_on_sample ERROR CORRECTION pass=%d/%d feedback=%s",
+            correction_pass,
+            MAX_CORRECTION_PASSES,
             feedback,
         )
-        for tick in range(ERROR_CORRECTION_TICKS):
-            logger.debug(
-                "[experiment] train_on_sample ERROR_CORRECTION tick %d/%d features=%s feedback=%s",
-                tick + 1, ERROR_CORRECTION_TICKS, features, feedback,
-            )
-            result = step_network(
-                current,
-                NetworkStepInput(raw_input=features, top_down_feedback=feedback),
-                call_llm_batch,
-            )
-            current = result.state
-            logger.debug(
-                "[experiment] train_on_sample ERROR_CORRECTION tick %d/%d prediction=%s",
-                tick + 1, ERROR_CORRECTION_TICKS, result.prediction,
-            )
+        correction = settle_phase(
+            current,
+            features=features,
+            feedback=feedback,
+            call_llm_batch=call_llm_batch,
+            tick_budget=correction_tick_count(current),
+            log_prefix="train_on_sample ERROR_CORRECTION",
+        )
+        current = commit_phase(
+            correction.state,
+            features=features,
+            feedback=feedback,
+            call_llm_batch=call_llm_batch,
+            log_prefix="train_on_sample ERROR_CORRECTION",
+        ).state
+        prediction = predict_from_state(
+            current,
+            features=features,
+            call_llm_batch=call_llm_batch,
+            log_prefix="train_on_sample VERIFY",
+        )
+        logger.debug(
+            "[experiment] train_on_sample ERROR CORRECTION pass=%d prediction=%s",
+            correction_pass,
+            prediction,
+        )
     logger.debug(
-        "[experiment] train_on_sample END features=%s target=%d\n"
+        "[experiment] train_on_sample END features=%s target=%s\n"
         "  NETWORK STATE:\n%s",
-        features, target, format_network_state(current),
+        features, target_label, format_network_state(current),
     )
     return current
 
@@ -105,170 +229,17 @@ def evaluate_sample(
     state: NetworkState, features: str, call_llm_batch: BatchLlmCaller,
 ) -> tuple[NetworkState, str]:
     logger.debug("[experiment] evaluate_sample START features=%s", features)
-    current = state
-    prediction = "unknown"
-    for tick in range(PROPAGATION_TICKS):
-        logger.debug(
-            "[experiment] evaluate_sample PROPAGATION tick %d/%d features=%s",
-            tick + 1, PROPAGATION_TICKS, features,
-        )
-        result = step_network(
-            current,
-            NetworkStepInput(raw_input=features, top_down_feedback="Evaluate"),
-            call_llm_batch,
-        )
-        current = result.state
-        prediction = result.prediction
-        logger.debug(
-            "[experiment] evaluate_sample PROPAGATION tick %d/%d prediction=%s",
-            tick + 1, PROPAGATION_TICKS, prediction,
-        )
+    working_state = reset_network_traces(state)
+    propagation = settle_phase(
+        working_state,
+        features=features,
+        feedback="Evaluate",
+        call_llm_batch=call_llm_batch,
+        tick_budget=propagation_tick_count(working_state),
+        log_prefix="evaluate_sample PROPAGATION",
+    )
     logger.debug(
         "[experiment] evaluate_sample END features=%s prediction=%s",
-        features, prediction,
+        features, propagation.prediction,
     )
-    return current, prediction
-
-
-# ---------------------------------------------------------------------------
-# Experiment phases
-# ---------------------------------------------------------------------------
-
-def run_training_phase(
-    state: NetworkState,
-    digits: list[int],
-    call_llm_batch: BatchLlmCaller,
-    phase_name: str,
-) -> NetworkState:
-    logger.info("[experiment] === %s ===", phase_name)
-    logger.debug(
-        "[experiment] %s START STATE:\n%s",
-        phase_name, format_network_state(state),
-    )
-    current = state
-    for features, target in generate_mnist_samples(digits):
-        logger.debug(
-            "[experiment] training sample features=%s target=%d",
-            features, target,
-        )
-        current = train_on_sample(current, features, target, call_llm_batch)
-        _, prediction = evaluate_sample(current, features, call_llm_batch)
-        status = "correct" if prediction == str(target) else "wrong"
-        logger.info(
-            "[experiment] Train | Input: '%s' | Target: %d | Pred: %s | %s",
-            features, target, prediction, status,
-        )
-    logger.debug(
-        "[experiment] %s END STATE:\n%s",
-        phase_name, format_network_state(current),
-    )
-    return current
-
-
-def run_evaluation_phase(
-    state: NetworkState,
-    digits: list[int],
-    call_llm_batch: BatchLlmCaller,
-    phase_name: str,
-) -> NetworkState:
-    logger.info("[experiment] === %s ===", phase_name)
-    logger.debug(
-        "[experiment] %s START STATE:\n%s",
-        phase_name, format_network_state(state),
-    )
-    current = state
-    correct = 0
-    total = 0
-    for features, target in generate_mnist_samples(digits):
-        logger.debug(
-            "[experiment] evaluating sample features=%s target=%d",
-            features, target,
-        )
-        current, prediction = evaluate_sample(current, features, call_llm_batch)
-        is_correct = prediction == str(target)
-        if is_correct:
-            correct += 1
-        total += 1
-        status = "correct" if is_correct else "FORGOTTEN"
-        logger.info(
-            "[experiment] Eval  | Input: '%s' | Target: %d | Pred: %s | %s",
-            features, target, prediction, status,
-        )
-    logger.info("[experiment] Accuracy: %d/%d", correct, total)
-    logger.debug(
-        "[experiment] %s END STATE:\n%s",
-        phase_name, format_network_state(current),
-    )
-    return current
-
-
-def run_topology_phase(
-    state: NetworkState,
-    call_llm_batch: BatchLlmCaller,
-) -> None:
-    logger.info("[experiment] === Phase 4: Dynamic Topology (Neuron Removal) ===")
-    logger.debug(
-        "[experiment] topology phase STATE BEFORE:\n%s",
-        format_network_state(state),
-    )
-    layer_0 = state.layers[0]
-    if len(layer_0.neurons) < 2:
-        logger.info("[experiment] Layer 0 has fewer than 2 neurons, skipping removal")
-        return
-
-    logger.info("[experiment] Removing sensory neuron L0_N0 (simulating cell death)")
-    reduced_layer = LayerState(neurons=layer_0.neurons[1:])
-    reduced_layers = (reduced_layer,) + state.layers[1:]
-    reduced_activations = (state.activations[0][1:],) + state.activations[1:]
-    reduced_feedbacks = (state.feedbacks[0][1:],) + state.feedbacks[1:]
-    reduced_state = NetworkState(
-        layers=reduced_layers,
-        activations=reduced_activations,
-        feedbacks=reduced_feedbacks,
-    )
-    logger.debug(
-        "[experiment] topology phase REDUCED STATE:\n%s",
-        format_network_state(reduced_state),
-    )
-
-    result = step_network(
-        reduced_state,
-        NetworkStepInput(raw_input="Straight vertical line", top_down_feedback="Evaluate"),
-        call_llm_batch,
-    )
-    logger.info(
-        "[experiment] Post-damage prediction: %s (no shape crash!)", result.prediction,
-    )
-    logger.debug(
-        "[experiment] topology phase STATE AFTER:\n%s",
-        format_network_state(result.state),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-def run_experiment(options: ExperimentOptions, call_llm_batch: BatchLlmCaller) -> None:
-    layer_sizes = options.layer_sizes or DEFAULT_LAYER_SIZES
-    state = create_network_state(layer_sizes)
-    logger.info("[experiment] Network created with layers: %s", layer_sizes)
-
-    # Phase 1: Learn digits 0 and 1
-    state = run_training_phase(state, [0, 1], call_llm_batch, "Phase 1: Learning 0 and 1")
-
-    # Phase 2: Introduce digit 2 (continual learning)
-    state = run_training_phase(state, [2], call_llm_batch, "Phase 2: Introducing digit 2")
-
-    # Phase 3: Test all digits (verify no catastrophic forgetting)
-    state = run_evaluation_phase(
-        state, [0, 1, 2], call_llm_batch, "Phase 3: Testing all digits (forgetting check)",
-    )
-
-    # Phase 4: Dynamic topology — neuron removal
-    run_topology_phase(state, call_llm_batch)
-
-    # Print final learned state
-    logger.info("[experiment] Final learned tokens of output neuron:")
-    output_neuron = state.layers[-1].neurons[0]
-    logger.info("[experiment] %s", output_neuron.state)
+    return state, propagation.prediction

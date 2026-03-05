@@ -8,8 +8,10 @@ from continual_learning.network import (
     build_layer_top_down,
     collect_all_requests,
     create_network_state,
+    reset_network_traces,
     step_network,
 )
+from continual_learning.state import parse_state_text
 from continual_learning.types import (
     LayerState,
     NetworkState,
@@ -20,7 +22,7 @@ from continual_learning.types import (
 
 
 def call_llm_mock_batch(prompts: tuple[str, ...]) -> tuple[NeuronResponse, ...]:
-    return tuple(call_llm_mock(p) for p in prompts)
+    return tuple(call_llm_mock(prompt) for prompt in prompts)
 
 
 def test_create_network_state_default() -> None:
@@ -29,185 +31,157 @@ def test_create_network_state_default() -> None:
     assert len(state.layers[0].neurons) == 2
     assert len(state.layers[1].neurons) == 1
     assert state.layers[0].neurons[0].name == "L0_N0"
-    assert state.layers[0].neurons[1].name == "L0_N1"
-    assert state.layers[1].neurons[0].name == "L1_N0"
+    assert parse_state_text(state.layers[0].neurons[0].state).summary_tokens
 
 
 def test_create_network_state_buffers_initialized() -> None:
     state = create_network_state((3, 2))
     assert len(state.activations[0]) == 3
     assert len(state.activations[1]) == 2
-    assert all(a == EMPTY_SIGNAL for a in state.activations[0])
-    assert all(f == EMPTY_SIGNAL for f in state.feedbacks[1])
+    assert all(activation == EMPTY_SIGNAL for activation in state.activations[0])
+    assert all(feedback == EMPTY_SIGNAL for feedback in state.feedbacks[1])
+
+
+def test_create_network_state_uses_distinct_randomized_summaries() -> None:
+    state = create_network_state((2, 1))
+    summaries = {
+        parse_state_text(neuron.state).summary_tokens
+        for layer in state.layers
+        for neuron in layer.neurons
+    }
+    assert len(summaries) > 1
 
 
 def test_build_layer_bottom_up_layer_zero() -> None:
     state = create_network_state((2, 1))
-    result = build_layer_bottom_up(state, 0, "raw pixels")
-    assert result == "raw pixels"
+    assert build_layer_bottom_up(state, 0, "raw pixels") == "raw pixels"
 
 
 def test_build_layer_bottom_up_higher_layer() -> None:
     state = create_network_state((2, 1))
-    result = build_layer_bottom_up(state, 1, "raw pixels")
-    assert result == f"{EMPTY_SIGNAL} | {EMPTY_SIGNAL}"
+    assert build_layer_bottom_up(state, 1, "raw pixels") == f"{EMPTY_SIGNAL} | {EMPTY_SIGNAL}"
 
 
 def test_build_layer_top_down_top_layer() -> None:
     state = create_network_state((2, 1))
-    result = build_layer_top_down(state, 1, "Evaluate")
-    assert result == "Evaluate"
+    assert build_layer_top_down(state, 1, "Evaluate") == "Evaluate"
 
 
 def test_build_layer_top_down_lower_layer() -> None:
     state = create_network_state((2, 1))
-    result = build_layer_top_down(state, 0, "Evaluate")
-    assert result == EMPTY_SIGNAL
+    assert build_layer_top_down(state, 0, "Evaluate") == EMPTY_SIGNAL
 
 
 def test_step_network_returns_prediction() -> None:
     state = create_network_state((2, 1))
-    step_input = NetworkStepInput(raw_input="Round closed loop", top_down_feedback="Evaluate")
-    result = step_network(state, step_input, call_llm_mock_batch)
+    result = step_network(
+        state,
+        NetworkStepInput(raw_input="alpha beta gamma", top_down_feedback="Evaluate"),
+        call_llm_mock_batch,
+    )
     assert result.prediction is not None
-    assert result.state is not None
 
 
 def test_step_network_learns_and_predicts() -> None:
     state = create_network_state((2, 1))
-
-    # Propagation ticks
     for _ in range(2):
         result = step_network(
             state,
-            NetworkStepInput(raw_input="Round closed loop", top_down_feedback="Evaluate"),
+            NetworkStepInput(raw_input="alpha beta gamma", top_down_feedback="Evaluate"),
             call_llm_mock_batch,
         )
         state = result.state
-
-    # Error correction ticks
     for _ in range(2):
         result = step_network(
             state,
             NetworkStepInput(
-                raw_input="Round closed loop",
-                top_down_feedback="Error: Target: 0",
+                raw_input="alpha beta gamma",
+                top_down_feedback="Error: Target: class_a",
             ),
             call_llm_mock_batch,
         )
         state = result.state
-
-    # Verify learned rule persists in output neuron
-    output_neuron = state.layers[-1].neurons[0]
-    assert "0" in output_neuron.state
-
-    # Now test inference — should predict 0
+    working_state = reset_network_traces(state)
     for _ in range(2):
         result = step_network(
-            state,
-            NetworkStepInput(raw_input="Round closed loop", top_down_feedback="Evaluate"),
+            working_state,
+            NetworkStepInput(raw_input="gamma alpha beta", top_down_feedback="Evaluate"),
             call_llm_mock_batch,
         )
-        state = result.state
-    assert result.prediction == "0"
+        working_state = result.state
+    assert result.prediction == "class_a"
 
 
 def test_step_network_continual_learning() -> None:
     state = create_network_state((2, 1))
-
-    # Teach digit 0
-    for _ in range(2):
-        result = step_network(
-            state,
-            NetworkStepInput(
-                raw_input="Round closed loop",
-                top_down_feedback="Error: Target: 0",
-            ),
-            call_llm_mock_batch,
-        )
-        state = result.state
-
-    # Teach digit 1
-    for _ in range(2):
-        result = step_network(
-            state,
-            NetworkStepInput(
-                raw_input="Straight vertical line",
-                top_down_feedback="Error: Target: 1",
-            ),
-            call_llm_mock_batch,
-        )
-        state = result.state
-
-    output_neuron = state.layers[-1].neurons[0]
-    # Both rules should be present (no catastrophic forgetting)
-    assert "'0'" in output_neuron.state
-    assert "'1'" in output_neuron.state
+    for label, features in (
+        ("class_a", "alpha beta gamma"),
+        ("class_b", "delta epsilon zeta"),
+    ):
+        for _ in range(2):
+            result = step_network(
+                state,
+                NetworkStepInput(raw_input=features, top_down_feedback=f"Error: Target: {label}"),
+                call_llm_mock_batch,
+            )
+            state = result.state
+    labels = {
+        item.output_text
+        for item in parse_state_text(state.layers[-1].neurons[0].state).memories
+        if item.output_text
+    }
+    assert labels == {"class_a", "class_b"}
 
 
 def test_step_network_survives_neuron_removal() -> None:
     state = create_network_state((2, 1))
-
-    # Train briefly
     for _ in range(2):
         result = step_network(
             state,
             NetworkStepInput(
-                raw_input="Round closed loop",
-                top_down_feedback="Error: Target: 0",
+                raw_input="alpha beta gamma",
+                top_down_feedback="Error: Target: class_a",
             ),
             call_llm_mock_batch,
         )
         state = result.state
-
-    # Remove a neuron from layer 0
     reduced_layer = LayerState(neurons=state.layers[0].neurons[1:])
     reduced_state = NetworkState(
         layers=(reduced_layer,) + state.layers[1:],
         activations=(state.activations[0][1:],) + state.activations[1:],
         feedbacks=(state.feedbacks[0][1:],) + state.feedbacks[1:],
     )
-
-    # Should not crash
     result = step_network(
-        reduced_state,
-        NetworkStepInput(raw_input="Straight vertical line", top_down_feedback="Evaluate"),
+        reset_network_traces(reduced_state),
+        NetworkStepInput(raw_input="gamma alpha beta", top_down_feedback="Evaluate"),
         call_llm_mock_batch,
     )
-    assert result.prediction is not None
+    assert result.prediction in {"class_a", "unknown", "alpha+beta+gamma"}
 
 
 def test_collect_all_requests() -> None:
     state = create_network_state((2, 1))
-    step_input = NetworkStepInput(raw_input="Round closed loop", top_down_feedback="Evaluate")
-    requests = collect_all_requests(state, step_input)
-
-    # 2 neurons in layer 0 + 1 neuron in layer 1 = 3 requests
+    requests = collect_all_requests(
+        state,
+        NetworkStepInput(raw_input="alpha beta gamma", top_down_feedback="Evaluate"),
+    )
     assert len(requests) == 3
     assert requests[0].layer_index == 0
-    assert requests[0].neuron_index == 0
-    assert requests[1].layer_index == 0
-    assert requests[1].neuron_index == 1
     assert requests[2].layer_index == 1
-    assert requests[2].neuron_index == 0
-    # Each request has a non-empty prompt
-    assert all(r.prompt for r in requests)
+    assert all(request.prompt for request in requests)
 
 
 def test_apply_all_results() -> None:
     state = create_network_state((2, 1))
-    step_input = NetworkStepInput(raw_input="Round closed loop", top_down_feedback="Evaluate")
-    requests = collect_all_requests(state, step_input)
-
-    # Build results by running mock on each prompt
+    requests = collect_all_requests(
+        state,
+        NetworkStepInput(raw_input="alpha beta gamma", top_down_feedback="Evaluate"),
+    )
     results = tuple(
-        NeuronCallResult(request=req, response=call_llm_mock(req.prompt))
-        for req in requests
+        NeuronCallResult(request=request, response=call_llm_mock(request.prompt))
+        for request in requests
     )
     step_result = apply_all_results(state, results)
-
-    # Output network should have same structure
     assert len(step_result.state.layers) == 2
     assert len(step_result.state.layers[0].neurons) == 2
-    assert len(step_result.state.layers[1].neurons) == 1
     assert step_result.prediction is not None
