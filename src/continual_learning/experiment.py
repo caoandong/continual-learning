@@ -14,8 +14,8 @@ from continual_learning.network import (
     step_network,
 )
 from continual_learning.types import (
+    BatchLlmCaller,
     ExperimentOptions,
-    LlmCaller,
     LayerState,
     NetworkState,
     NetworkStepInput,
@@ -44,7 +44,7 @@ def generate_mnist_samples(digits: list[int]) -> Iterator[tuple[str, int]]:
 # ---------------------------------------------------------------------------
 
 def train_on_sample(
-    state: NetworkState, features: str, target: int, call_llm: LlmCaller,
+    state: NetworkState, features: str, target: int, call_llm_batch: BatchLlmCaller,
 ) -> NetworkState:
     logger.debug(
         "[experiment] train_on_sample START features=%s target=%d",
@@ -59,7 +59,7 @@ def train_on_sample(
         result = step_network(
             current,
             NetworkStepInput(raw_input=features, top_down_feedback="Evaluate"),
-            call_llm,
+            call_llm_batch,
         )
         current = result.state
         logger.debug(
@@ -86,7 +86,7 @@ def train_on_sample(
             result = step_network(
                 current,
                 NetworkStepInput(raw_input=features, top_down_feedback=feedback),
-                call_llm,
+                call_llm_batch,
             )
             current = result.state
             logger.debug(
@@ -102,7 +102,7 @@ def train_on_sample(
 
 
 def evaluate_sample(
-    state: NetworkState, features: str, call_llm: LlmCaller,
+    state: NetworkState, features: str, call_llm_batch: BatchLlmCaller,
 ) -> tuple[NetworkState, str]:
     logger.debug("[experiment] evaluate_sample START features=%s", features)
     current = state
@@ -115,7 +115,7 @@ def evaluate_sample(
         result = step_network(
             current,
             NetworkStepInput(raw_input=features, top_down_feedback="Evaluate"),
-            call_llm,
+            call_llm_batch,
         )
         current = result.state
         prediction = result.prediction
@@ -137,7 +137,7 @@ def evaluate_sample(
 def run_training_phase(
     state: NetworkState,
     digits: list[int],
-    call_llm: LlmCaller,
+    call_llm_batch: BatchLlmCaller,
     phase_name: str,
 ) -> NetworkState:
     logger.info("[experiment] === %s ===", phase_name)
@@ -151,8 +151,8 @@ def run_training_phase(
             "[experiment] training sample features=%s target=%d",
             features, target,
         )
-        current = train_on_sample(current, features, target, call_llm)
-        _, prediction = evaluate_sample(current, features, call_llm)
+        current = train_on_sample(current, features, target, call_llm_batch)
+        _, prediction = evaluate_sample(current, features, call_llm_batch)
         status = "correct" if prediction == str(target) else "wrong"
         logger.info(
             "[experiment] Train | Input: '%s' | Target: %d | Pred: %s | %s",
@@ -168,7 +168,7 @@ def run_training_phase(
 def run_evaluation_phase(
     state: NetworkState,
     digits: list[int],
-    call_llm: LlmCaller,
+    call_llm_batch: BatchLlmCaller,
     phase_name: str,
 ) -> NetworkState:
     logger.info("[experiment] === %s ===", phase_name)
@@ -184,7 +184,7 @@ def run_evaluation_phase(
             "[experiment] evaluating sample features=%s target=%d",
             features, target,
         )
-        current, prediction = evaluate_sample(current, features, call_llm)
+        current, prediction = evaluate_sample(current, features, call_llm_batch)
         is_correct = prediction == str(target)
         if is_correct:
             correct += 1
@@ -204,7 +204,7 @@ def run_evaluation_phase(
 
 def run_topology_phase(
     state: NetworkState,
-    call_llm: LlmCaller,
+    call_llm_batch: BatchLlmCaller,
 ) -> None:
     logger.info("[experiment] === Phase 4: Dynamic Topology (Neuron Removal) ===")
     logger.debug(
@@ -234,7 +234,7 @@ def run_topology_phase(
     result = step_network(
         reduced_state,
         NetworkStepInput(raw_input="Straight vertical line", top_down_feedback="Evaluate"),
-        call_llm,
+        call_llm_batch,
     )
     logger.info(
         "[experiment] Post-damage prediction: %s (no shape crash!)", result.prediction,
@@ -249,24 +249,24 @@ def run_topology_phase(
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def run_experiment(options: ExperimentOptions, call_llm: LlmCaller) -> None:
+def run_experiment(options: ExperimentOptions, call_llm_batch: BatchLlmCaller) -> None:
     layer_sizes = options.layer_sizes or DEFAULT_LAYER_SIZES
     state = create_network_state(layer_sizes)
     logger.info("[experiment] Network created with layers: %s", layer_sizes)
 
     # Phase 1: Learn digits 0 and 1
-    state = run_training_phase(state, [0, 1], call_llm, "Phase 1: Learning 0 and 1")
+    state = run_training_phase(state, [0, 1], call_llm_batch, "Phase 1: Learning 0 and 1")
 
     # Phase 2: Introduce digit 2 (continual learning)
-    state = run_training_phase(state, [2], call_llm, "Phase 2: Introducing digit 2")
+    state = run_training_phase(state, [2], call_llm_batch, "Phase 2: Introducing digit 2")
 
     # Phase 3: Test all digits (verify no catastrophic forgetting)
     state = run_evaluation_phase(
-        state, [0, 1, 2], call_llm, "Phase 3: Testing all digits (forgetting check)",
+        state, [0, 1, 2], call_llm_batch, "Phase 3: Testing all digits (forgetting check)",
     )
 
     # Phase 4: Dynamic topology — neuron removal
-    run_topology_phase(state, call_llm)
+    run_topology_phase(state, call_llm_batch)
 
     # Print final learned state
     logger.info("[experiment] Final learned tokens of output neuron:")

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from continual_learning.constants import DEFAULT_LAYER_SIZES, DEFAULT_MODEL
 from continual_learning.experiment import run_experiment
-from continual_learning.llm import create_llm_caller
+from continual_learning.llm import create_batch_llm_caller
 from continual_learning.types import ExperimentOptions
 
 
@@ -59,8 +59,8 @@ def main() -> None:
         layer_sizes=args.layer_sizes,
         verbose=args.verbose,
     )
-    call_llm = create_llm_caller(options)
-    run_experiment(options, call_llm)
+    call_llm_batch = create_batch_llm_caller(options)
+    run_experiment(options, call_llm_batch)
 
 
 if __name__ == "__main__":

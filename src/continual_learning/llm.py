@@ -4,13 +4,19 @@ import functools
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from continual_learning.constants import (
     DEFAULT_TEMPERATURE,
     EMPTY_SIGNAL,
     NEURON_SYSTEM_PROMPT,
 )
-from continual_learning.types import ExperimentOptions, LlmCaller, NeuronResponse
+from continual_learning.types import (
+    BatchLlmCaller,
+    ExperimentOptions,
+    LlmCaller,
+    NeuronResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -184,3 +190,23 @@ def create_llm_caller(options: ExperimentOptions) -> LlmCaller:
         return call_llm_mock
     logger.info("[llm] Using litellm with model=%s", options.model)
     return functools.partial(call_llm_litellm, model=options.model)
+
+
+# ---------------------------------------------------------------------------
+# Batch execution
+# ---------------------------------------------------------------------------
+
+def call_llm_batch_threaded(
+    prompts: tuple[str, ...], call_llm: LlmCaller,
+) -> tuple[NeuronResponse, ...]:
+    """Execute all LLM calls in parallel via ONE ThreadPoolExecutor."""
+    if not prompts:
+        return ()
+    with ThreadPoolExecutor(max_workers=len(prompts)) as executor:
+        futures = [executor.submit(call_llm, p) for p in prompts]
+        return tuple(f.result() for f in futures)
+
+
+def create_batch_llm_caller(options: ExperimentOptions) -> BatchLlmCaller:
+    call_llm = create_llm_caller(options)
+    return functools.partial(call_llm_batch_threaded, call_llm=call_llm)

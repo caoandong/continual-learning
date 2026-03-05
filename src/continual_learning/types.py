@@ -58,4 +58,19 @@ class ExperimentOptions:
     verbose: bool
 
 
+@dataclass(frozen=True)
+class NeuronCallRequest:
+    layer_index: int
+    neuron_index: int
+    neuron: NeuronState
+    prompt: str
+
+
+@dataclass(frozen=True)
+class NeuronCallResult:
+    request: NeuronCallRequest
+    response: NeuronResponse
+
+
 LlmCaller = Callable[[str], NeuronResponse]
+BatchLlmCaller = Callable[[tuple[str, ...]], tuple[NeuronResponse, ...]]
