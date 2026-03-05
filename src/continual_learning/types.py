@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from continual_learning.constants import EMPTY_SIGNAL
+from continual_learning.constants import DEFAULT_NEURON_STATE, EMPTY_SIGNAL
 
 
 @dataclass(frozen=True)
 class NeuronState:
     name: str
-    state: str = ""
+    state: str = DEFAULT_NEURON_STATE
     last_output: str = EMPTY_SIGNAL
 
 

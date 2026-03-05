@@ -71,6 +71,11 @@ def learn_new_rule(state: str, bottom_up: str, top_down: str) -> NeuronResponse:
     return response
 
 
+def compress_to_word(text: str) -> str:
+    words = text.split()
+    return words[0].lower().rstrip(",") if words else "unknown"
+
+
 def apply_existing_rules(state: str, bottom_up: str) -> NeuronResponse:
     match = re.search(r"\[If '" + re.escape(bottom_up) + r"' -> '(.*?)'\]", state)
     if match:
@@ -80,9 +85,9 @@ def apply_existing_rules(state: str, bottom_up: str) -> NeuronResponse:
             bottom_up, activation, state,
         )
     elif bottom_up != EMPTY_SIGNAL:
-        activation = f"Features({bottom_up})"
+        activation = compress_to_word(bottom_up)
         logger.debug(
-            "[llm] apply_existing_rules NO MATCH for '%s' -> Features fallback=%s",
+            "[llm] apply_existing_rules NO MATCH for '%s' -> compressed=%s",
             bottom_up, activation,
         )
     else:

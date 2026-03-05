@@ -21,6 +21,7 @@ to predict the Target. Never delete old rules.
 
 Respond ONLY with JSON: {{"new_state": "...", "activation_up": "...", "feedback_down": "..."}}"""
 
+DEFAULT_NEURON_STATE = "Compress input to one word"
 DEFAULT_MODEL = "gpt-5.2"
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_LAYER_SIZES = (2, 1)

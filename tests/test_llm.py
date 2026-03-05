@@ -59,7 +59,7 @@ def test_apply_existing_rules_matches() -> None:
 
 def test_apply_existing_rules_no_match() -> None:
     response = apply_existing_rules("", "Round closed loop")
-    assert response.activation_up == "Features(Round closed loop)"
+    assert response.activation_up == "round"
 
 
 def test_apply_existing_rules_none_input() -> None:
