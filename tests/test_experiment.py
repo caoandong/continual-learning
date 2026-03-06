@@ -11,7 +11,7 @@ def call_llm_mock_batch(prompts: tuple[str, ...]) -> tuple[NeuronResponse, ...]:
 
 
 def test_evaluate_sample_does_not_mutate_persistent_state() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     trained_state = train_on_sample(
         state,
         "alpha beta gamma",

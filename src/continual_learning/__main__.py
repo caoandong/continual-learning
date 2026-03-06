@@ -47,7 +47,7 @@ def main() -> None:
         "--layer-sizes",
         type=parse_layer_sizes,
         default=DEFAULT_LAYER_SIZES,
-        help="Comma-separated layer sizes (default: 2,1)",
+        help="Comma-separated layer sizes (default: 1,1)",
     )
     parser.add_argument(
         "--sample",

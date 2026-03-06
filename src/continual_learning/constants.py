@@ -16,6 +16,7 @@ CURRENT STATE (Persistent Memory JSON):
 INPUTS:
 Bottom-up context: {bottom_up}
 Top-down feedback: {top_down}
+Sensory context: {sensory_input}
 State update mode: {state_update_mode}
 Your last output: {last_output}
 
@@ -23,9 +24,10 @@ INSTRUCTIONS:
 1. Treat `CURRENT STATE` as the entire persistent memory. You are only the stateless update rule.
 2. The memory may contain arbitrary general-purpose tokens and compressed experiences.
 3. Keep `new_state` as valid JSON with this exact top-level shape:
-   `{{"version":1,"summary_tokens":["..."],"memories":[{{"input_tokens":["..."],"output_text":"...","weight":1}}]}}`
+   `{{"version":1,"summary_tokens":["..."],"memories":[{{"input_tokens":["..."],"numeric_fingerprint":[1,2],"output_text":"...","weight":1}}]}}`
 4. `summary_tokens` should be a short compressed summary of the neuron's current memory.
-5. `memories` should store compressed reusable traces and predictive mappings.
+5. `memories` should store compressed reusable traces and predictive mappings. `numeric_fingerprint` is optional and is used only for numeric streams.
+6. When updating memory, bind current bottom-up evidence with any non-empty top-down feedback instead of treating them as unrelated facts.
 7. When `Top-down feedback` contains `Error: Target: X`, store the label exactly as `X`. Do not rename it, explain it, or wrap it.
 8. `activation_up` must be either an exact stored label string or a compact token sketch built from the current input/state.
 9. `feedback_down` must be `none` or a compact token sketch built from the current input/state.
@@ -40,7 +42,7 @@ DEFAULT_NEURON_STATE = (
 )
 DEFAULT_MODEL = "gpt-5.2"
 DEFAULT_TEMPERATURE = 0.0
-DEFAULT_LAYER_SIZES = (2, 1)
+DEFAULT_LAYER_SIZES = (1, 1)
 EMPTY_SIGNAL = "None"
 RANDOM_STATE_SEED = 7
 RANDOM_STATE_TOKEN_COUNT = 3
@@ -59,11 +61,41 @@ RANDOM_STATE_TOKEN_POOL = (
     "seed11",
 )
 NEURON_STATE_VERSION = 1
-MAX_PATTERN_TOKENS = 5
-MAX_PROTOCOL_TOKENS = 4
-MAX_MEMORY_PATTERNS = 8
+MAX_MEMORY_INPUT_TOKENS = 192
+MAX_OUTPUT_TOKENS = 8
+MAX_SUMMARY_TOKENS = 16
+MAX_PROTOCOL_TOKENS = 48
+MAX_SENSORY_RESIDUAL_TOKENS = 24
+MAX_FEEDBACK_RESIDUAL_TOKENS = 24
+MAX_MEMORY_PATTERNS = 16
+MAX_SUPPORT_MEMORIES = 32
 MEMORY_MATCH_THRESHOLD = 0.45
+WEAK_MEMORY_MATCH_THRESHOLD = 0.08
+MEMORY_MATCH_MARGIN = 0.03
 MEMORY_MERGE_THRESHOLD = 0.5
+UNSUPERVISED_MEMORY_MERGE_THRESHOLD = 0.9
+LONG_STREAM_TOKEN_THRESHOLD = 64
+MAX_GLOBAL_SIGNATURE_TOKENS = 8
+MAX_NUMERIC_SEGMENT_TOKENS_PER_SCALE = 16
+MAX_NUMERIC_RELATION_SIGNATURE_TOKENS = 24
+MAX_NUMERIC_WINDOW_SIGNATURE_TOKENS = 20
+MAX_DELTA_WINDOW_SIGNATURE_TOKENS = 20
+MAX_SHINGLE_SIGNATURE_TOKENS = 16
+MAX_ANCHOR_SIGNATURE_TOKENS = 24
+MAX_WINDOW_SIGNATURE_TOKENS = 20
+STREAM_ANCHOR_COUNT = 24
+STREAM_WINDOW_COUNT = 20
+STREAM_WINDOW_SIZE = 16
+NUMERIC_FINGERPRINT_SIZE = 32
+NUMERIC_FINGERPRINT_SCALE = 1000
+NUMERIC_SEGMENT_SCALES = (4, 8, 16, 32)
+GENERIC_SHINGLE_WIDTHS = (2, 4, 8)
+PROTOTYPE_MATCH_WEIGHT = 0.5
+MAX_RETRIEVED_MEMORIES = 3
+SENSORY_CHANNEL_MATCH_WEIGHT = 1.0
+FEEDBACK_CHANNEL_MATCH_WEIGHT = 1.0
+COMPETING_MEMORY_WEAKEN_THRESHOLD = 0.45
+NUMERIC_FINGERPRINT_MATCH_WEIGHT = 1.5
 
 PROPAGATION_TICKS = 2
 ERROR_CORRECTION_TICKS = 2

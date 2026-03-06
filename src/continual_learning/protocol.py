@@ -12,27 +12,46 @@ PROTOCOL_CONTROL_TOKENS = frozenset({
 })
 
 
-def unique_sorted_tokens(tokens: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(sorted({token for token in tokens if token}))
+def unique_preserving_order(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for token in tokens:
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        result.append(token)
+    return tuple(result)
+
+
+def split_atomic_tokens(text: str) -> tuple[str, ...]:
+    return tuple(
+        token.lower()
+        for token in re.split(r"[\s+]+", text.strip())
+        if token
+    )
 
 
 def tokens_from_text(text: str) -> tuple[str, ...]:
-    raw_tokens = tuple(
+    return tuple(
         token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
+        for token in split_atomic_tokens(text)
         if token not in PROTOCOL_CONTROL_TOKENS
     )
-    return unique_sorted_tokens(raw_tokens)
 
 
 def tokens_from_pattern(pattern: str) -> tuple[str, ...]:
     if pattern.lower() in PROTOCOL_CONTROL_TOKENS or pattern == "":
         return ()
-    return unique_sorted_tokens(tuple(pattern.split("+")))
+    return tuple(
+        token
+        for token in split_atomic_tokens(pattern)
+        if token not in PROTOCOL_CONTROL_TOKENS
+    )
 
 
 def build_pattern(tokens: tuple[str, ...]) -> str:
-    return "+".join(tokens) if tokens else EMPTY_SIGNAL
+    compact = unique_preserving_order(tokens)
+    return "+".join(compact) if compact else EMPTY_SIGNAL
 
 
 def canonicalize_signal(text: str) -> str:
@@ -51,4 +70,9 @@ def overlap_score(left: tuple[str, ...], right: tuple[str, ...]) -> float:
 
 def extract_target_label(feedback: str) -> str | None:
     match = re.search(r"Target:\s*(.+)$", feedback)
+    return match.group(1).strip() if match else None
+
+
+def extract_predicted_label(feedback: str) -> str | None:
+    match = re.search(r"Predicted:\s*([^|]+)", feedback)
     return match.group(1).strip() if match else None

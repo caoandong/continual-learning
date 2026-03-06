@@ -9,7 +9,7 @@ from continual_learning.constants import (
     RANDOM_STATE_SEED,
 )
 from continual_learning.neuron import apply_neuron_response, build_neuron_prompt
-from continual_learning.state import build_random_state_text
+from continual_learning.state import build_random_state_text, numeric_fingerprint_from_text
 from continual_learning.types import (
     BatchLlmCaller,
     LayerState,
@@ -82,6 +82,22 @@ def build_layer_top_down(
     return result
 
 
+def build_layer_sensory_input(
+    layer_index: int,
+    raw_input: str,
+) -> str:
+    if layer_index == 0:
+        result = raw_input
+    else:
+        fingerprint = numeric_fingerprint_from_text(raw_input)
+        result = " ".join(str(value) for value in fingerprint) if fingerprint else EMPTY_SIGNAL
+    logger.debug(
+        "[network] build_layer_sensory_input layer=%d -> %s",
+        layer_index, result,
+    )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: Collect all LLM call requests (pure, sync)
 # ---------------------------------------------------------------------------
@@ -121,6 +137,10 @@ def collect_all_requests(
                 ),
                 top_down=build_layer_top_down(
                     state, layer_index, step_input.top_down_feedback,
+                ),
+                sensory_input=build_layer_sensory_input(
+                    layer_index,
+                    step_input.raw_input,
                 ),
                 allow_state_update=step_input.allow_state_update,
             ),

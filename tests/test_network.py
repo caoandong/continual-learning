@@ -5,6 +5,7 @@ from continual_learning.llm import call_llm_mock
 from continual_learning.network import (
     apply_all_results,
     build_layer_bottom_up,
+    build_layer_sensory_input,
     build_layer_top_down,
     collect_all_requests,
     create_network_state,
@@ -26,9 +27,9 @@ def call_llm_mock_batch(prompts: tuple[str, ...]) -> tuple[NeuronResponse, ...]:
 
 
 def test_create_network_state_default() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     assert len(state.layers) == 2
-    assert len(state.layers[0].neurons) == 2
+    assert len(state.layers[0].neurons) == 1
     assert len(state.layers[1].neurons) == 1
     assert state.layers[0].neurons[0].name == "L0_N0"
     assert parse_state_text(state.layers[0].neurons[0].state).summary_tokens
@@ -43,7 +44,7 @@ def test_create_network_state_buffers_initialized() -> None:
 
 
 def test_create_network_state_uses_distinct_randomized_summaries() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     summaries = {
         parse_state_text(neuron.state).summary_tokens
         for layer in state.layers
@@ -53,27 +54,41 @@ def test_create_network_state_uses_distinct_randomized_summaries() -> None:
 
 
 def test_build_layer_bottom_up_layer_zero() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     assert build_layer_bottom_up(state, 0, "raw pixels") == "raw pixels"
 
 
 def test_build_layer_bottom_up_higher_layer() -> None:
-    state = create_network_state((2, 1))
-    assert build_layer_bottom_up(state, 1, "raw pixels") == f"{EMPTY_SIGNAL} | {EMPTY_SIGNAL}"
+    state = create_network_state((1, 1))
+    assert build_layer_bottom_up(state, 1, "raw pixels") == EMPTY_SIGNAL
 
 
 def test_build_layer_top_down_top_layer() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     assert build_layer_top_down(state, 1, "Evaluate") == "Evaluate"
 
 
 def test_build_layer_top_down_lower_layer() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     assert build_layer_top_down(state, 0, "Evaluate") == EMPTY_SIGNAL
 
 
+def test_build_layer_sensory_input_layer_zero() -> None:
+    assert build_layer_sensory_input(0, "raw pixels") == "raw pixels"
+
+
+def test_build_layer_sensory_input_higher_layer() -> None:
+    assert build_layer_sensory_input(1, "raw pixels") == "None"
+
+
+def test_build_layer_sensory_input_higher_layer_numeric_returns_fingerprint() -> None:
+    result = build_layer_sensory_input(1, "0 1 2 3 4 5 6 7")
+    assert result != EMPTY_SIGNAL
+    assert all(token.lstrip("-").isdigit() for token in result.split())
+
+
 def test_step_network_returns_prediction() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     result = step_network(
         state,
         NetworkStepInput(raw_input="alpha beta gamma", top_down_feedback="Evaluate"),
@@ -83,7 +98,7 @@ def test_step_network_returns_prediction() -> None:
 
 
 def test_step_network_learns_and_predicts() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     for _ in range(2):
         result = step_network(
             state,
@@ -113,7 +128,7 @@ def test_step_network_learns_and_predicts() -> None:
 
 
 def test_step_network_continual_learning() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     for label, features in (
         ("class_a", "alpha beta gamma"),
         ("class_b", "delta epsilon zeta"),
@@ -160,19 +175,21 @@ def test_step_network_survives_neuron_removal() -> None:
 
 
 def test_collect_all_requests() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     requests = collect_all_requests(
         state,
         NetworkStepInput(raw_input="alpha beta gamma", top_down_feedback="Evaluate"),
     )
-    assert len(requests) == 3
+    assert len(requests) == 2
     assert requests[0].layer_index == 0
-    assert requests[2].layer_index == 1
+    assert requests[1].layer_index == 1
+    assert "Sensory context: alpha beta gamma" in requests[0].prompt
+    assert "Sensory context: None" in requests[1].prompt
     assert all(request.prompt for request in requests)
 
 
 def test_apply_all_results() -> None:
-    state = create_network_state((2, 1))
+    state = create_network_state((1, 1))
     requests = collect_all_requests(
         state,
         NetworkStepInput(raw_input="alpha beta gamma", top_down_feedback="Evaluate"),
@@ -183,5 +200,5 @@ def test_apply_all_results() -> None:
     )
     step_result = apply_all_results(state, results)
     assert len(step_result.state.layers) == 2
-    assert len(step_result.state.layers[0].neurons) == 2
+    assert len(step_result.state.layers[0].neurons) == 1
     assert step_result.prediction is not None

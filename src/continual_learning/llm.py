@@ -11,12 +11,14 @@ from continual_learning.state import (
     StateEvolutionInput,
     StructuredNeuronResponseModel,
     debug_state_summary,
+    evolve_state,
+    merge_state_updates,
     parse_state_text,
+    parsed_state_from_model,
     readout_response,
     serialize_state,
     sanitize_state_update,
     state_response,
-    parsed_state_from_model,
 )
 from continual_learning.types import (
     BatchLlmCaller,
@@ -40,8 +42,8 @@ def extract_prompt_section(prompt: str, section_start: str, section_end: str) ->
 
 
 def extract_prompt_field(prompt: str, field_name: str) -> str:
-    pattern = re.escape(field_name) + r":\s*(.*)"
-    match = re.search(pattern, prompt)
+    pattern = r"^" + re.escape(field_name) + r":[ \t]*(.*)$"
+    match = re.search(pattern, prompt, re.MULTILINE)
     result = match.group(1).strip() if match else ""
     logger.debug("[llm] extract_prompt_field '%s' -> %s", field_name, result)
     return result
@@ -73,6 +75,7 @@ def response_from_state_readout(
     state_text: str,
     bottom_up: str,
     top_down: str,
+    sensory_input: str = "",
     preferred_activation: str = "",
     preferred_feedback: str = "",
 ) -> NeuronResponse:
@@ -81,6 +84,7 @@ def response_from_state_readout(
         state=state,
         bottom_up=bottom_up,
         top_down=top_down,
+        sensory_input=sensory_input,
         preferred_activation=preferred_activation,
         preferred_feedback=preferred_feedback,
     )
@@ -97,6 +101,7 @@ def learn_new_rule(state: str, bottom_up: str, top_down: str) -> NeuronResponse:
             previous_state_text=state,
             bottom_up=bottom_up,
             top_down=top_down,
+            sensory_input=bottom_up,
         ),
     )
 
@@ -107,6 +112,7 @@ def apply_existing_rules(state: str, bottom_up: str) -> NeuronResponse:
             previous_state_text=state,
             bottom_up=bottom_up,
             top_down="Evaluate",
+            sensory_input=bottom_up,
         ),
     )
 
@@ -118,26 +124,30 @@ def call_llm_mock(prompt: str) -> NeuronResponse:
     )
     bottom_up = extract_prompt_field(prompt, "Bottom-up context")
     top_down = extract_prompt_field(prompt, "Top-down feedback")
+    sensory_input = extract_prompt_field(prompt, "Sensory context")
     state_update_mode = extract_prompt_field(prompt, "State update mode")
     logger.debug(
         "[llm] call_llm_mock PARSED\n"
         "  state=%s\n"
         "  bottom_up=%s\n"
         "  top_down=%s\n"
+        "  sensory_input=%s\n"
         "  state_update_mode=%s",
-        debug_state_summary(state), bottom_up, top_down, state_update_mode,
+        debug_state_summary(state), bottom_up, top_down, sensory_input, state_update_mode,
     )
     if state_update_mode == "read_only":
         return response_from_state_readout(
             state_text=state,
             bottom_up=bottom_up,
             top_down=top_down,
+            sensory_input=sensory_input,
         )
     return response_from_state_evolution(
         StateEvolutionInput(
             previous_state_text=state,
             bottom_up=bottom_up,
             top_down=top_down,
+            sensory_input=sensory_input,
         ),
     )
 
@@ -148,21 +158,32 @@ def response_from_structured_output(
     parsed: StructuredNeuronResponseModel,
     bottom_up: str,
     top_down: str,
+    sensory_input: str,
     allow_state_update: bool,
 ) -> NeuronResponse:
     previous_state = parse_state_text(previous_state_text)
     state = previous_state
     if allow_state_update:
+        deterministic_state = evolve_state(
+            StateEvolutionInput(
+                previous_state_text=previous_state_text,
+                bottom_up=bottom_up,
+                top_down=top_down,
+                sensory_input=sensory_input,
+            ),
+        )
         proposed_state = parsed_state_from_model(parsed.new_state)
-        state = sanitize_state_update(
+        sanitized_state = sanitize_state_update(
             previous_state=previous_state,
             proposed_state=proposed_state,
             top_down=top_down,
         )
+        state = merge_state_updates(deterministic_state, sanitized_state)
     activation_up, feedback_down = readout_response(
         state=state,
         bottom_up=bottom_up,
         top_down=top_down,
+        sensory_input=sensory_input,
         preferred_activation=parsed.activation_up,
         preferred_feedback=parsed.feedback_down,
     )
@@ -196,6 +217,7 @@ def call_llm_litellm(prompt: str, *, model: str) -> NeuronResponse:
     )
     bottom_up = extract_prompt_field(prompt, "Bottom-up context")
     top_down = extract_prompt_field(prompt, "Top-down feedback")
+    sensory_input = extract_prompt_field(prompt, "Sensory context")
     allow_state_update = extract_prompt_field(prompt, "State update mode") != "read_only"
     logger.debug(
         "[llm] call_llm_litellm model=%s FULL PROMPT:\n%s",
@@ -218,6 +240,7 @@ def call_llm_litellm(prompt: str, *, model: str) -> NeuronResponse:
         parsed=parsed,
         bottom_up=bottom_up,
         top_down=top_down,
+        sensory_input=sensory_input,
         allow_state_update=allow_state_update,
     )
 

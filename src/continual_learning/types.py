@@ -24,6 +24,7 @@ class NeuronResponse:
 class NeuronStepInput:
     bottom_up: str
     top_down: str
+    sensory_input: str = ""
     allow_state_update: bool = True
 
 

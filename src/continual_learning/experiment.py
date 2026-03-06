@@ -144,6 +144,12 @@ def predict_from_state(
     return settled.prediction
 
 
+def correction_feedback(*, target_label: str, prediction: str) -> str:
+    if prediction and prediction != "unknown":
+        return f"Error: Predicted: {prediction} | Target: {target_label}"
+    return f"Error: Target: {target_label}"
+
+
 # ---------------------------------------------------------------------------
 # Training / evaluation helpers
 # ---------------------------------------------------------------------------
@@ -181,13 +187,18 @@ def train_on_sample(
         "[experiment] train_on_sample prediction=%s target=%s match=%s",
         prediction, target_label, prediction == target_label,
     )
-    feedback = f"Error: Target: {target_label}"
-    correction_pass = 0
-    while prediction != target_label and correction_pass < MAX_CORRECTION_PASSES:
-        correction_pass += 1
+    supervision_pass = 0
+    while supervision_pass < MAX_CORRECTION_PASSES:
+        if supervision_pass > 0 and prediction == target_label:
+            break
+        supervision_pass += 1
+        feedback = correction_feedback(
+            target_label=target_label,
+            prediction=prediction,
+        )
         logger.debug(
-            "[experiment] train_on_sample ERROR CORRECTION pass=%d/%d feedback=%s",
-            correction_pass,
+            "[experiment] train_on_sample SUPERVISED UPDATE pass=%d/%d feedback=%s",
+            supervision_pass,
             MAX_CORRECTION_PASSES,
             feedback,
         )
@@ -213,8 +224,8 @@ def train_on_sample(
             log_prefix="train_on_sample VERIFY",
         )
         logger.debug(
-            "[experiment] train_on_sample ERROR CORRECTION pass=%d prediction=%s",
-            correction_pass,
+            "[experiment] train_on_sample SUPERVISED UPDATE pass=%d prediction=%s",
+            supervision_pass,
             prediction,
         )
     logger.debug(

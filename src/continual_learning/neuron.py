@@ -15,16 +15,18 @@ def build_neuron_prompt(neuron: NeuronState, step_input: NeuronStepInput) -> str
         state=neuron.state,
         bottom_up=step_input.bottom_up,
         top_down=step_input.top_down,
+        sensory_input=step_input.sensory_input,
         state_update_mode="write" if step_input.allow_state_update else "read_only",
         last_output=neuron.last_output,
     )
     logger.debug(
         "[neuron] build_neuron_prompt %s\n"
-        "  inputs: bottom_up=%s | top_down=%s | allow_state_update=%s | last_output=%s\n"
+        "  inputs: bottom_up=%s | top_down=%s | sensory_input=%s | allow_state_update=%s | last_output=%s\n"
         "  current_state=%s",
         neuron.name,
         step_input.bottom_up,
         step_input.top_down,
+        step_input.sensory_input,
         step_input.allow_state_update,
         neuron.last_output,
         neuron.state,
