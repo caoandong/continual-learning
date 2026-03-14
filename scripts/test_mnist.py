@@ -6,7 +6,6 @@ import argparse
 import gzip
 import logging
 import struct
-import sys
 import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,7 +15,7 @@ from continual_learning.constants import DEFAULT_LAYER_SIZES, DEFAULT_MODEL
 from continual_learning.experiment import evaluate_sample, train_on_sample
 from continual_learning.llm import create_batch_llm_caller
 from continual_learning.network import create_network_state
-from continual_learning.types import BatchLlmCaller, ExperimentOptions, NetworkState
+from continual_learning.types import BatchLlmCaller, NetworkState
 
 logger = logging.getLogger(__name__)
 
@@ -174,17 +173,18 @@ def evaluate_examples(
     current = state
     for digit in digits:
         for example in examples_by_digit[digit]:
-            current, prediction = evaluate_sample(current, example.raw_stream, call_llm_batch)
-            is_correct = prediction == str(digit)
+            current, readout = evaluate_sample(current, example.raw_stream, call_llm_batch)
+            is_correct = readout.task_output == str(digit)
             if is_correct:
                 correct += 1
             total += 1
             status = "correct" if is_correct else "WRONG"
             logger.info(
-                "  digit %d | sample %d | pred: %-12s | %s | %s",
+                "  digit %d | sample %d | task: %-12s | latent: %-24s | %s | %s",
                 digit,
                 example.index,
-                prediction,
+                readout.task_output,
+                readout.latent_output,
                 status,
                 preview_stream(example.raw_stream),
             )
@@ -207,15 +207,16 @@ def train_digit(
                 str(example.label),
                 call_llm_batch,
             )
-            _, prediction = evaluate_sample(current, example.raw_stream, call_llm_batch)
-            status = "correct" if prediction == str(example.label) else "wrong"
+            _, readout = evaluate_sample(current, example.raw_stream, call_llm_batch)
+            status = "correct" if readout.task_output == str(example.label) else "wrong"
             logger.info(
-                "  round %d/%d | digit %d | sample %d | pred: %-12s | %s",
+                "  round %d/%d | digit %d | sample %d | task: %-12s | latent: %-24s | %s",
                 round_number,
                 rounds,
                 example.label,
                 example.index,
-                prediction,
+                readout.task_output,
+                readout.latent_output,
                 status,
             )
     return current
@@ -224,7 +225,7 @@ def train_digit(
 def inspect_neuron_states(state: NetworkState) -> None:
     for layer in state.layers:
         for neuron in layer.neurons:
-            logger.info("  %s: %s", neuron.name, neuron.state)
+            logger.info("  %s: %s", neuron.name, neuron.state_text)
 
 
 def run_benchmark(*, config: BenchmarkConfig, call_llm_batch: BatchLlmCaller) -> None:
@@ -333,18 +334,10 @@ def main() -> None:
         default=DEFAULT_MODEL,
         help="LLM model name (default: %(default)s)",
     )
-    parser.add_argument("--mock", action="store_true", help="Use mock LLM")
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
     args = parser.parse_args()
 
     configure_logging(verbose=args.verbose)
-    use_mock = args.mock or "--model" not in sys.argv
-    options = ExperimentOptions(
-        model=args.model,
-        use_mock=use_mock,
-        layer_sizes=args.layer_sizes,
-        verbose=args.verbose,
-    )
     config = BenchmarkConfig(
         digits=args.digits,
         rounds=args.rounds,
@@ -353,7 +346,7 @@ def main() -> None:
         eval_examples_per_digit=args.eval_examples_per_digit,
         dataset_dir=args.dataset_dir,
     )
-    call_llm_batch = create_batch_llm_caller(options)
+    call_llm_batch = create_batch_llm_caller(model=args.model)
     run_benchmark(config=config, call_llm_batch=call_llm_batch)
 
 

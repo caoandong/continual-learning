@@ -1,62 +1,48 @@
 from __future__ import annotations
 
 from continual_learning.neuron import apply_neuron_response, build_neuron_prompt
-from continual_learning.types import NeuronResponse, NeuronState, NeuronStepInput
+from continual_learning.types import NeuronResponse, NeuronState
 
 
-def test_build_neuron_prompt_contains_name() -> None:
-    neuron = NeuronState(name="L0_N1")
-    step_input = NeuronStepInput(bottom_up="some input", top_down="some feedback")
-    prompt = build_neuron_prompt(neuron, step_input)
-    assert "L0_N1" in prompt
-
-
-def test_build_neuron_prompt_contains_state() -> None:
-    neuron = NeuronState(name="test", state="[If 'x' -> '1']")
-    step_input = NeuronStepInput(bottom_up="x", top_down="y")
-    prompt = build_neuron_prompt(neuron, step_input)
-    assert "[If 'x' -> '1']" in prompt
-
-
-def test_build_neuron_prompt_contains_inputs() -> None:
-    neuron = NeuronState(name="test")
-    step_input = NeuronStepInput(bottom_up="my_input", top_down="my_feedback")
-    prompt = build_neuron_prompt(neuron, step_input)
-    assert "my_input" in prompt
-    assert "my_feedback" in prompt
-
-
-def test_build_neuron_prompt_contains_last_output() -> None:
-    neuron = NeuronState(name="test", last_output="prev_value")
-    step_input = NeuronStepInput(bottom_up="x", top_down="y")
-    prompt = build_neuron_prompt(neuron, step_input)
-    assert "prev_value" in prompt
-
-
-def test_apply_neuron_response_updates_state() -> None:
-    neuron = NeuronState(name="L0_N0", state="old state")
-    response = NeuronResponse(
-        new_state="new state",
-        activation_up="signal",
-        feedback_down="feedback",
+def test_build_neuron_prompt_contains_minimal_fields_only() -> None:
+    prompt = build_neuron_prompt(
+        NeuronState(name="L0_N0", state_text="seed0 seed1", last_latent="old"),
+        bottom_up="alpha beta",
+        top_down="higher layer",
+        teaching_signal="label",
+        allow_state_update=False,
     )
-    updated = apply_neuron_response(neuron, response)
-    assert updated.state == "new state"
-    assert updated.last_output == "signal"
+    assert "CURRENT STATE:" in prompt
+    assert "Bottom-up context: alpha beta" in prompt
+    assert "Top-down feedback: higher layer" in prompt
+    assert "Teaching signal: label" in prompt
+    assert "State update mode: read_only" in prompt
+    assert "Last latent output: old" in prompt
+
+
+def test_build_neuron_prompt_excludes_old_special_case_fields() -> None:
+    prompt = build_neuron_prompt(
+        NeuronState(name="L0_N0"),
+        bottom_up="raw input",
+        top_down="feedback",
+        teaching_signal="target",
+        allow_state_update=True,
+    )
+    assert "Sensory context" not in prompt
+    assert "numeric_fingerprint" not in prompt
+    assert "memories" not in prompt
+
+
+def test_apply_neuron_response_updates_state_and_last_output() -> None:
+    updated = apply_neuron_response(
+        NeuronState(name="L0_N0", state_text="before", last_latent="old"),
+        NeuronResponse(
+            state_text="after",
+            latent_up="signal",
+            task_up="task",
+            latent_down="down",
+        ),
+    )
     assert updated.name == "L0_N0"
-
-
-def test_apply_neuron_response_preserves_name() -> None:
-    neuron = NeuronState(name="important_name")
-    response = NeuronResponse(new_state="s", activation_up="a", feedback_down="f")
-    updated = apply_neuron_response(neuron, response)
-    assert updated.name == "important_name"
-
-
-def test_neuron_state_is_frozen() -> None:
-    neuron = NeuronState(name="test")
-    try:
-        neuron.state = "mutated"  # type: ignore[misc]
-        raise AssertionError("Should have raised FrozenInstanceError")
-    except AttributeError:
-        pass
+    assert updated.state_text == "after"
+    assert updated.last_latent == "signal"

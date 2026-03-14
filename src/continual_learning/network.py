@@ -2,271 +2,193 @@ from __future__ import annotations
 
 import logging
 import random
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
-from continual_learning.constants import (
-    EMPTY_SIGNAL,
-    RANDOM_STATE_SEED,
-)
+from continual_learning.constants import EMPTY_SIGNAL, RANDOM_STATE_SEED
 from continual_learning.neuron import apply_neuron_response, build_neuron_prompt
-from continual_learning.state import build_random_state_text, numeric_fingerprint_from_text
+from continual_learning.state import build_random_state_text, render_signal
 from continual_learning.types import (
     BatchLlmCaller,
     LayerState,
+    NetworkReadout,
     NetworkState,
     NetworkStepInput,
     NetworkStepResult,
-    NeuronCallRequest,
-    NeuronCallResult,
+    NeuronResponse,
     NeuronState,
-    NeuronStepInput,
 )
 
 logger = logging.getLogger(__name__)
 
-_step_counter = 0
-
-
-# ---------------------------------------------------------------------------
-# State formatting helpers
-# ---------------------------------------------------------------------------
 
 def format_neuron_state(neuron: NeuronState) -> str:
     return (
         f"    name={neuron.name}\n"
-        f"    state={neuron.state}\n"
-        f"    last_output={neuron.last_output}"
+        f"    state_text={render_signal(neuron.state_text)}\n"
+        f"    last_latent={render_signal(neuron.last_latent)}"
     )
 
 
 def format_network_state(state: NetworkState) -> str:
-    lines = []
-    for layer_idx, layer in enumerate(state.layers):
-        lines.append(f"  Layer {layer_idx} ({len(layer.neurons)} neurons):")
+    lines: list[str] = []
+    for layer_index, layer in enumerate(state.layers):
+        lines.append(f"  Layer {layer_index}:")
         for neuron in layer.neurons:
             lines.append(format_neuron_state(neuron))
-        lines.append(f"    activations={state.activations[layer_idx]}")
-        lines.append(f"    feedbacks={state.feedbacks[layer_idx]}")
+        lines.append(f"    latent_activations={state.latent_activations[layer_index]}")
+        lines.append(f"    task_outputs={state.task_outputs[layer_index]}")
+        lines.append(f"    latent_feedbacks={state.latent_feedbacks[layer_index]}")
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Layer helpers
-# ---------------------------------------------------------------------------
+def join_signals(signals: tuple[str, ...]) -> str:
+    active_signals = tuple(signal for signal in signals if signal)
+    if active_signals:
+        return " | ".join(active_signals)
+    return EMPTY_SIGNAL
+
 
 def build_layer_bottom_up(
-    network_state: NetworkState, layer_index: int, raw_input: str,
-) -> str:
-    if layer_index == 0:
-        result = raw_input
-    else:
-        result = " | ".join(network_state.activations[layer_index - 1])
-    logger.debug(
-        "[network] build_layer_bottom_up layer=%d -> %s",
-        layer_index, result,
-    )
-    return result
-
-
-def build_layer_top_down(
-    network_state: NetworkState, layer_index: int, top_down_feedback: str,
-) -> str:
-    if layer_index == len(network_state.layers) - 1:
-        result = top_down_feedback
-    else:
-        result = " | ".join(network_state.feedbacks[layer_index + 1])
-    logger.debug(
-        "[network] build_layer_top_down layer=%d -> %s",
-        layer_index, result,
-    )
-    return result
-
-
-def build_layer_sensory_input(
+    network_state: NetworkState,
     layer_index: int,
     raw_input: str,
 ) -> str:
     if layer_index == 0:
-        result = raw_input
-    else:
-        fingerprint = numeric_fingerprint_from_text(raw_input)
-        result = " ".join(str(value) for value in fingerprint) if fingerprint else EMPTY_SIGNAL
-    logger.debug(
-        "[network] build_layer_sensory_input layer=%d -> %s",
-        layer_index, result,
-    )
-    return result
+        return raw_input
+    return join_signals(network_state.latent_activations[layer_index - 1])
 
 
-# ---------------------------------------------------------------------------
-# Phase 1: Collect all LLM call requests (pure, sync)
-# ---------------------------------------------------------------------------
+def build_layer_top_down(
+    network_state: NetworkState,
+    layer_index: int,
+    top_down_feedback: str,
+) -> str:
+    if layer_index == len(network_state.layers) - 1:
+        return top_down_feedback
+    return join_signals(network_state.latent_feedbacks[layer_index + 1])
 
-@dataclass(frozen=True)
-class LayerCollectInput:
-    layer_index: int
-    neurons: tuple[NeuronState, ...]
-    step_input: NeuronStepInput
 
-
-def collect_requests_for_layer(
-    layer_input: LayerCollectInput,
-) -> tuple[NeuronCallRequest, ...]:
-    return tuple(
-        NeuronCallRequest(
-            layer_index=layer_input.layer_index,
-            neuron_index=i,
-            neuron=neuron,
-            prompt=build_neuron_prompt(neuron, layer_input.step_input),
+def collect_prompts(
+    state: NetworkState,
+    step_input: NetworkStepInput,
+) -> tuple[tuple[int, int, NeuronState, str], ...]:
+    collected: list[tuple[int, int, NeuronState, str]] = []
+    for layer_index, layer in enumerate(state.layers):
+        bottom_up = build_layer_bottom_up(state, layer_index, step_input.raw_input)
+        top_down = build_layer_top_down(state, layer_index, step_input.top_down_feedback)
+        teaching_signal = (
+            step_input.teaching_signal
+            if layer_index == len(state.layers) - 1
+            else EMPTY_SIGNAL
         )
-        for i, neuron in enumerate(layer_input.neurons)
-    )
-
-
-def collect_all_requests(
-    state: NetworkState, step_input: NetworkStepInput,
-) -> tuple[NeuronCallRequest, ...]:
-    all_requests: list[NeuronCallRequest] = []
-    for layer_index in range(len(state.layers)):
-        layer_input = LayerCollectInput(
-            layer_index=layer_index,
-            neurons=state.layers[layer_index].neurons,
-            step_input=NeuronStepInput(
-                bottom_up=build_layer_bottom_up(
-                    state, layer_index, step_input.raw_input,
-                ),
-                top_down=build_layer_top_down(
-                    state, layer_index, step_input.top_down_feedback,
-                ),
-                sensory_input=build_layer_sensory_input(
-                    layer_index,
-                    step_input.raw_input,
-                ),
+        for neuron_index, neuron in enumerate(layer.neurons):
+            prompt = build_neuron_prompt(
+                neuron,
+                bottom_up=bottom_up,
+                top_down=top_down,
+                teaching_signal=teaching_signal,
                 allow_state_update=step_input.allow_state_update,
+            )
+            collected.append((layer_index, neuron_index, neuron, prompt))
+    return tuple(collected)
+
+
+def apply_all_responses(
+    state: NetworkState,
+    collected: tuple[tuple[int, int, NeuronState, str], ...],
+    responses: tuple[NeuronResponse, ...],
+) -> NetworkStepResult:
+    if len(collected) != len(responses):
+        raise ValueError("LLM batch size did not match the number of neuron prompts")
+
+    grouped: list[list[tuple[int, NeuronState, NeuronResponse]]] = [[] for _ in state.layers]
+    for (layer_index, neuron_index, neuron, _), response in zip(collected, responses, strict=True):
+        grouped[layer_index].append((neuron_index, neuron, response))
+
+    layers: list[LayerState] = []
+    latent_activations: list[tuple[str, ...]] = []
+    task_outputs: list[tuple[str, ...]] = []
+    latent_feedbacks: list[tuple[str, ...]] = []
+    for layer_results in grouped:
+        ordered = tuple(sorted(layer_results, key=lambda item: item[0]))
+        layers.append(
+            LayerState(
+                neurons=tuple(
+                    apply_neuron_response(neuron, response)
+                    for _, neuron, response in ordered
+                ),
             ),
         )
-        all_requests.extend(collect_requests_for_layer(layer_input))
-    return tuple(all_requests)
+        latent_activations.append(tuple(response.latent_up for _, _, response in ordered))
+        task_outputs.append(tuple(response.task_up for _, _, response in ordered))
+        latent_feedbacks.append(tuple(response.latent_down for _, _, response in ordered))
 
-
-# ---------------------------------------------------------------------------
-# Phase 3: Apply all results (pure, sync)
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class LayerApplyResult:
-    layer: LayerState
-    activations: tuple[str, ...]
-    feedbacks: tuple[str, ...]
-
-
-def apply_results_for_layer(
-    results: tuple[NeuronCallResult, ...],
-) -> LayerApplyResult:
-    new_neurons = tuple(
-        apply_neuron_response(r.request.neuron, r.response) for r in results
+    next_state = NetworkState(
+        layers=tuple(layers),
+        latent_activations=tuple(latent_activations),
+        task_outputs=tuple(task_outputs),
+        latent_feedbacks=tuple(latent_feedbacks),
     )
-    activations = tuple(r.response.activation_up for r in results)
-    feedbacks = tuple(r.response.feedback_down for r in results)
-    return LayerApplyResult(
-        layer=LayerState(neurons=new_neurons),
-        activations=activations,
-        feedbacks=feedbacks,
+    readout = NetworkReadout(
+        latent_output=next_state.latent_activations[-1][0] if next_state.latent_activations[-1] else EMPTY_SIGNAL,
+        task_output=next_state.task_outputs[-1][0] if next_state.task_outputs[-1] else EMPTY_SIGNAL,
+    )
+    return NetworkStepResult(
+        state=next_state,
+        latent_output=readout.latent_output,
+        task_output=readout.task_output,
     )
 
 
-def group_results_by_layer(
-    results: tuple[NeuronCallResult, ...], layer_count: int,
-) -> tuple[tuple[NeuronCallResult, ...], ...]:
-    grouped: list[list[NeuronCallResult]] = [[] for _ in range(layer_count)]
-    for result in results:
-        grouped[result.request.layer_index].append(result)
-    return tuple(
-        tuple(sorted(layer, key=lambda r: r.request.neuron_index))
-        for layer in grouped
-    )
+def build_random_neuron_state(*, name: str, generator: random.Random) -> NeuronState:
+    return NeuronState(name=name, state_text=build_random_state_text(generator=generator))
 
-
-def apply_all_results(
-    state: NetworkState, results: tuple[NeuronCallResult, ...],
-) -> NetworkStepResult:
-    grouped = group_results_by_layer(results, len(state.layers))
-    layer_outputs = tuple(apply_results_for_layer(g) for g in grouped)
-    new_state = NetworkState(
-        layers=tuple(o.layer for o in layer_outputs),
-        activations=tuple(o.activations for o in layer_outputs),
-        feedbacks=tuple(o.feedbacks for o in layer_outputs),
-    )
-    prediction = (
-        new_state.activations[-1][0]
-        if new_state.activations[-1]
-        else "unknown"
-    )
-    return NetworkStepResult(state=new_state, prediction=prediction)
-
-
-def build_random_neuron_state(
-    *, name: str, generator: random.Random,
-) -> NeuronState:
-    return NeuronState(name=name, state=build_random_state_text(generator=generator))
-
-
-# ---------------------------------------------------------------------------
-# Network operations
-# ---------------------------------------------------------------------------
 
 def create_network_state(layer_sizes: tuple[int, ...]) -> NetworkState:
     generator = random.Random(RANDOM_STATE_SEED)
     layers: list[LayerState] = []
     activations: list[tuple[str, ...]] = []
+    task_outputs: list[tuple[str, ...]] = []
     feedbacks: list[tuple[str, ...]] = []
     for layer_index, size in enumerate(layer_sizes):
         neurons = tuple(
             build_random_neuron_state(
-                name=f"L{layer_index}_N{i}",
+                name=f"L{layer_index}_N{neuron_index}",
                 generator=generator,
             )
-            for i in range(size)
+            for neuron_index in range(size)
         )
         layers.append(LayerState(neurons=neurons))
         activations.append(tuple(EMPTY_SIGNAL for _ in range(size)))
+        task_outputs.append(tuple(EMPTY_SIGNAL for _ in range(size)))
         feedbacks.append(tuple(EMPTY_SIGNAL for _ in range(size)))
     state = NetworkState(
         layers=tuple(layers),
-        activations=tuple(activations),
-        feedbacks=tuple(feedbacks),
+        latent_activations=tuple(activations),
+        task_outputs=tuple(task_outputs),
+        latent_feedbacks=tuple(feedbacks),
     )
-    logger.debug(
-        "[network] create_network_state layer_sizes=%s\n"
-        "  INITIAL STATE:\n%s",
-        layer_sizes, format_network_state(state),
-    )
+    logger.debug("[network] create_network_state\n%s", format_network_state(state))
     return state
 
 
 def reset_network_traces(state: NetworkState) -> NetworkState:
     layers = tuple(
         LayerState(
-            neurons=tuple(replace(neuron, last_output=EMPTY_SIGNAL) for neuron in layer.neurons),
+            neurons=tuple(replace(neuron, last_latent=EMPTY_SIGNAL) for neuron in layer.neurons),
         )
         for layer in state.layers
     )
-    activations = tuple(
-        tuple(EMPTY_SIGNAL for _ in layer.neurons) for layer in layers
-    )
-    feedbacks = tuple(
-        tuple(EMPTY_SIGNAL for _ in layer.neurons) for layer in layers
-    )
+    activations = tuple(tuple(EMPTY_SIGNAL for _ in layer.neurons) for layer in layers)
+    task_outputs = tuple(tuple(EMPTY_SIGNAL for _ in layer.neurons) for layer in layers)
+    feedbacks = tuple(tuple(EMPTY_SIGNAL for _ in layer.neurons) for layer in layers)
     reset_state = NetworkState(
         layers=layers,
-        activations=activations,
-        feedbacks=feedbacks,
+        latent_activations=activations,
+        task_outputs=task_outputs,
+        latent_feedbacks=feedbacks,
     )
-    logger.debug(
-        "[network] reset_network_traces\n"
-        "  RESET STATE:\n%s",
-        format_network_state(reset_state),
-    )
+    logger.debug("[network] reset_network_traces\n%s", format_network_state(reset_state))
     return reset_state
 
 
@@ -275,49 +197,20 @@ def step_network(
     step_input: NetworkStepInput,
     call_llm_batch: BatchLlmCaller,
 ) -> NetworkStepResult:
-    global _step_counter  # noqa: PLW0603
-    _step_counter += 1
-    step_num = _step_counter
-
     logger.debug(
-        "\n"
-        "============================================================\n"
-        "  NETWORK STEP %d\n"
-        "============================================================\n"
-        "  raw_input=%s\n"
-        "  top_down_feedback=%s\n"
-        "------------------------------------------------------------\n"
-        "  STATE BEFORE:\n%s\n"
-        "------------------------------------------------------------",
-        step_num,
-        step_input.raw_input,
-        step_input.top_down_feedback,
-        format_network_state(state),
+        "[network] step_network START input=%s top_down=%s teaching_signal=%s allow_state_update=%s",
+        render_signal(step_input.raw_input),
+        render_signal(step_input.top_down_feedback),
+        render_signal(step_input.teaching_signal),
+        step_input.allow_state_update,
     )
-
-    # Phase 1: Collect all prompts (pure)
-    requests = collect_all_requests(state, step_input)
-
-    # Phase 2: Batch execute all LLM calls (one centralized call)
-    prompts = tuple(r.prompt for r in requests)
+    collected = collect_prompts(state, step_input)
+    prompts = tuple(prompt for _, _, _, prompt in collected)
     responses = call_llm_batch(prompts)
-    results = tuple(
-        NeuronCallResult(request=req, response=resp)
-        for req, resp in zip(requests, responses, strict=True)
-    )
-
-    # Phase 3: Apply all responses (pure)
-    step_result = apply_all_results(state, results)
-
+    result = apply_all_responses(state, collected, responses)
     logger.debug(
-        "------------------------------------------------------------\n"
-        "  NETWORK STEP %d RESULT\n"
-        "------------------------------------------------------------\n"
-        "  prediction=%s\n"
-        "  STATE AFTER:\n%s\n"
-        "============================================================",
-        step_num,
-        step_result.prediction,
-        format_network_state(step_result.state),
+        "[network] step_network END latent_output=%s task_output=%s",
+        render_signal(result.latent_output),
+        render_signal(result.task_output),
     )
-    return step_result
+    return result

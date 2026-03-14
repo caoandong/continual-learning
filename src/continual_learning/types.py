@@ -9,23 +9,16 @@ from continual_learning.constants import DEFAULT_NEURON_STATE, EMPTY_SIGNAL
 @dataclass(frozen=True)
 class NeuronState:
     name: str
-    state: str = DEFAULT_NEURON_STATE
-    last_output: str = EMPTY_SIGNAL
+    state_text: str = DEFAULT_NEURON_STATE
+    last_latent: str = EMPTY_SIGNAL
 
 
 @dataclass(frozen=True)
 class NeuronResponse:
-    new_state: str
-    activation_up: str
-    feedback_down: str
-
-
-@dataclass(frozen=True)
-class NeuronStepInput:
-    bottom_up: str
-    top_down: str
-    sensory_input: str = ""
-    allow_state_update: bool = True
+    state_text: str
+    latent_up: str
+    task_up: str
+    latent_down: str
 
 
 @dataclass(frozen=True)
@@ -36,43 +29,30 @@ class LayerState:
 @dataclass(frozen=True)
 class NetworkState:
     layers: tuple[LayerState, ...]
-    activations: tuple[tuple[str, ...], ...]
-    feedbacks: tuple[tuple[str, ...], ...]
+    latent_activations: tuple[tuple[str, ...], ...]
+    task_outputs: tuple[tuple[str, ...], ...]
+    latent_feedbacks: tuple[tuple[str, ...], ...]
 
 
 @dataclass(frozen=True)
 class NetworkStepInput:
     raw_input: str
-    top_down_feedback: str
+    top_down_feedback: str = EMPTY_SIGNAL
+    teaching_signal: str = EMPTY_SIGNAL
     allow_state_update: bool = True
+
+
+@dataclass(frozen=True)
+class NetworkReadout:
+    latent_output: str = EMPTY_SIGNAL
+    task_output: str = EMPTY_SIGNAL
 
 
 @dataclass(frozen=True)
 class NetworkStepResult:
     state: NetworkState
-    prediction: str
-
-
-@dataclass(frozen=True)
-class ExperimentOptions:
-    model: str
-    use_mock: bool
-    layer_sizes: tuple[int, ...]
-    verbose: bool
-
-
-@dataclass(frozen=True)
-class NeuronCallRequest:
-    layer_index: int
-    neuron_index: int
-    neuron: NeuronState
-    prompt: str
-
-
-@dataclass(frozen=True)
-class NeuronCallResult:
-    request: NeuronCallRequest
-    response: NeuronResponse
+    latent_output: str = EMPTY_SIGNAL
+    task_output: str = EMPTY_SIGNAL
 
 
 LlmCaller = Callable[[str], NeuronResponse]
