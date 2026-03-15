@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
-import types
 import sys
 
 import pytest
@@ -16,38 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import agent_tool_distill as distill
 
 
-def load_local_recursive_parse():
-    spec = importlib.util.spec_from_file_location(
-        "local_chat_parsing_utils",
-        Path("/Volumes/SB-XTM5/flair/software/transformers/src/transformers/utils/chat_parsing_utils.py"),
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec is not None and spec.loader is not None
-
-    fake_utils = types.ModuleType("transformers.utils")
-    fake_utils.is_jmespath_available = lambda: False
-    fake_transformers = types.ModuleType("transformers")
-    fake_transformers.utils = fake_utils
-
-    previous_transformers = sys.modules.get("transformers")
-    previous_utils = sys.modules.get("transformers.utils")
-    sys.modules["transformers"] = fake_transformers
-    sys.modules["transformers.utils"] = fake_utils
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        if previous_transformers is not None:
-            sys.modules["transformers"] = previous_transformers
-        else:
-            sys.modules.pop("transformers", None)
-        if previous_utils is not None:
-            sys.modules["transformers.utils"] = previous_utils
-        else:
-            sys.modules.pop("transformers.utils", None)
-
-    return module.recursive_parse
-
-
 class DummyTokenizer:
     def __init__(self):
         self.response_schema = distill.QWEN3_RESPONSE_SCHEMA
@@ -55,10 +21,6 @@ class DummyTokenizer:
         self.eos_token_id = 0
         self.pad_token_id = 0
         self.tokenized_texts = []
-
-    def parse_response(self, response, schema=None):
-        recursive_parse = load_local_recursive_parse()
-        return recursive_parse(response, schema or self.response_schema)
 
     def apply_chat_template(self, messages, tools=None, add_generation_prompt=True, tokenize=False):
         rendered = "\n".join(f"{message['role']}:{message.get('content', '')}" for message in messages)
@@ -114,9 +76,16 @@ def test_parse_assistant_response_qwen3_tool_calls_match_local_schema():
         "</tool_call>"
     )
     response = distill.parse_assistant_response(tokenizer, raw, "Qwen/Qwen3-1.7B")
-    expected = tokenizer.parse_response(raw)
 
-    assert response.tool_calls == expected["tool_calls"]
+    assert response.tool_calls == [
+        distill.make_tool_call(
+            "search_news",
+            {
+                "query": "qwen3 launch",
+                "top_k": 4,
+            },
+        )
+    ]
     assert response.content == ""
     assert response.thinking is None
 

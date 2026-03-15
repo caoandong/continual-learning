@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -273,8 +274,47 @@ def parse_csv_arg(value: str) -> List[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+@lru_cache(maxsize=None)
+def read_local_model_metadata(model_name: str) -> Dict[str, Any]:
+    path = Path(model_name).expanduser()
+    if not path.exists():
+        return {}
+
+    metadata: Dict[str, Any] = {}
+    config_path = path / "config.json"
+    if config_path.exists():
+        try:
+            metadata.update(json.loads(config_path.read_text()))
+        except Exception:
+            pass
+
+    readme_path = path / "README.md"
+    if readme_path.exists():
+        try:
+            metadata["readme_text"] = readme_path.read_text(errors="ignore")[:8192]
+        except Exception:
+            pass
+    return metadata
+
+
 def is_qwen3_model(model_name: str) -> bool:
-    return "qwen3" in model_name.lower()
+    lowered = model_name.lower()
+    if "qwen3" in lowered:
+        return True
+
+    metadata = read_local_model_metadata(model_name)
+    if metadata.get("model_type") == "qwen3":
+        return True
+    if any("qwen3" in str(arch).lower() for arch in metadata.get("architectures", [])):
+        return True
+    return "qwen3" in str(metadata.get("readme_text", "")).lower()
+
+
+def is_qwen3_instruct_2507_model(model_name: str) -> bool:
+    lowered = model_name.lower()
+    if "qwen3" in lowered and "instruct-2507" in lowered:
+        return True
+    return "instruct-2507" in str(read_local_model_metadata(model_name).get("readme_text", "")).lower()
 
 
 def chunk_text(text: str, words_per_chunk: int = 120, overlap: int = 30) -> List[str]:
@@ -411,7 +451,7 @@ def load_tokenizer_and_model(
     if load_in_4bit:
         model_kwargs["load_in_4bit"] = True
     else:
-        model_kwargs["torch_dtype"] = "auto"
+        model_kwargs["dtype"] = "auto"
 
     if runtime.device == "auto":
         model_kwargs["device_map"] = "auto"
@@ -600,6 +640,23 @@ def assistant_message_for_history(response: AssistantResponse) -> Dict[str, Any]
 
 
 def resolve_generation_kwargs(model_name: str, runtime: RuntimeConfig) -> Dict[str, Any]:
+    if is_qwen3_instruct_2507_model(model_name):
+        if runtime.reasoning_mode != "non_thinking":
+            raise ValueError(
+                f"{model_name} is a non-thinking Qwen3 Instruct checkpoint; "
+                "use --reasoning-mode non_thinking."
+            )
+        kwargs = {
+            "do_sample": True,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "max_new_tokens": runtime.max_new_tokens or 512,
+        }
+        if runtime.temperature is not None:
+            kwargs["temperature"] = runtime.temperature
+        return kwargs
+
     if is_qwen3_model(model_name):
         presets = {
             "non_thinking": {
