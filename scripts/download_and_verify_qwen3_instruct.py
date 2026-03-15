@@ -52,12 +52,12 @@ def model_kwargs_for_device(device: str) -> Dict[str, object]:
         "low_cpu_mem_usage": True,
     }
     if device == "cuda":
-        kwargs["torch_dtype"] = torch.bfloat16
+        kwargs["dtype"] = torch.bfloat16
         kwargs["device_map"] = "auto"
     elif device == "mps":
-        kwargs["torch_dtype"] = torch.float16
+        kwargs["dtype"] = torch.float16
     else:
-        kwargs["torch_dtype"] = torch.float32
+        kwargs["dtype"] = torch.float32
     return kwargs
 
 
@@ -84,6 +84,11 @@ def run_smoke_tests(
     max_new_tokens: int,
 ) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
+    generation_config = model.generation_config
+    generation_config.do_sample = False
+    generation_config.temperature = None
+    generation_config.top_p = None
+    generation_config.top_k = None
     for case in SMOKE_TESTS:
         messages = [
             {"role": "system", "content": "You are a concise assistant."},
@@ -96,7 +101,7 @@ def run_smoke_tests(
         with torch.inference_mode():
             generated = model.generate(
                 **encoded,
-                do_sample=False,
+                generation_config=generation_config,
                 max_new_tokens=max_new_tokens,
                 eos_token_id=tokenizer.eos_token_id,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,

@@ -333,6 +333,17 @@ uv run --active python scripts/download_and_verify_qwen3_instruct.py \
   --checkpoint-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints
 ```
 
+After the download finishes, you can also point the benchmark CLI at the local snapshot directly:
+
+```bash
+uv run agent-tool-distill evaluate \
+  --model /content/drive/MyDrive/flair/software/qwen3/checkpoints \
+  --device cuda \
+  --reasoning-mode non_thinking \
+  --mode vanilla \
+  --out runs/eval_qwen3_4b_instruct2507_smoke.json
+```
+
 ## Practical Knobs
 
 - Use `--teacher-mode guided` for reproducibility.
