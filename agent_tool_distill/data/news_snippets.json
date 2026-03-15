@@ -1,0 +1,119 @@
+[
+  {
+    "id": "openai_gpt54",
+    "split": "new",
+    "title": "Introducing GPT-5.4",
+    "date": "2026-03-05",
+    "source": "OpenAI",
+    "url": "https://openai.com/index/introducing-gpt-5-4/",
+    "text": "Introducing GPT-5.4, OpenAI's most capable and efficient frontier model for professional work, with state-of-the-art coding, computer use, tool search and long-context performance. Product announcement dated March 5, 2026."
+  },
+  {
+    "id": "openai_codex_security",
+    "split": "new",
+    "title": "Codex Security: now in research preview",
+    "date": "2026-03-06",
+    "source": "OpenAI",
+    "url": "https://openai.com/index/codex-security-now-in-research-preview/",
+    "text": "OpenAI introduced Codex Security, its application security agent, in research preview. It builds deep context about a codebase to identify complex vulnerabilities, surfaces higher-confidence findings and suggests fixes while reducing noisy insignificant bugs."
+  },
+  {
+    "id": "openai_learning_blocks",
+    "split": "new",
+    "title": "New ways to learn math and science in ChatGPT",
+    "date": "2026-03-10",
+    "source": "OpenAI",
+    "url": "https://openai.com/index/new-ways-to-learn-math-and-science-in-chatgpt/",
+    "text": "OpenAI announced new ways to learn math and science in ChatGPT, including interactive visual explanations. The company said 140 million people use ChatGPT each week to help them understand math and science concepts."
+  },
+  {
+    "id": "google_gemini_embedding_2",
+    "split": "new",
+    "title": "Gemini Embedding 2: Our first natively multimodal embedding model",
+    "date": "2026-03-10",
+    "source": "Google",
+    "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-embedding-2/",
+    "text": "Google announced Gemini Embedding 2, its first natively multimodal embedding model. It maps text, images, video, audio and documents into a single embedding space for multimodal retrieval and classification, and is available in public preview."
+  },
+  {
+    "id": "google_gemini_flash_lite",
+    "split": "new",
+    "title": "Gemini 3.1 Flash-Lite: Built for intelligence at scale",
+    "date": "2026-03-03",
+    "source": "Google",
+    "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-flash-lite/",
+    "text": "Google introduced Gemini 3.1 Flash-Lite as its fastest and most cost-efficient Gemini 3 series model. It is built for high-volume developer workloads and started rolling out in preview through the Gemini API in Google AI Studio and for enterprises via Vertex AI."
+  },
+  {
+    "id": "nvidia_nebius",
+    "split": "new",
+    "title": "NVIDIA and Nebius Partner to Scale Full-Stack AI Cloud",
+    "date": "2026-03-11",
+    "source": "NVIDIA",
+    "url": "https://nvidianews.nvidia.com/news/nvidia-and-nebius-partner-to-scale-full-stack-ai-cloud",
+    "text": "NVIDIA and Nebius Group N.V. announced a strategic partnership to develop and deploy the next generation of hyperscale cloud for the AI market. The release said Nebius will deploy more than 5 gigawatts of NVIDIA systems by the end of 2030."
+  },
+  {
+    "id": "nvidia_gtc_2026",
+    "split": "new",
+    "title": "NVIDIA CEO Jensen Huang and Global Technology Leaders to Showcase Age of AI at GTC 2026",
+    "date": "2026-03-03",
+    "source": "NVIDIA",
+    "url": "https://nvidianews.nvidia.com/news/nvidia-ceo-jensen-huang-and-global-technology-leaders-to-showcase-age-of-ai-at-gtc-2026",
+    "text": "NVIDIA announced that CEO Jensen Huang would deliver the GTC 2026 keynote. The announcement highlighted more than 1,000 sessions and breakthroughs across the AI stack at the conference."
+  },
+  {
+    "id": "nvidia_coherent",
+    "split": "new",
+    "title": "NVIDIA and Coherent Announce Strategic Partnership to Develop Optics Technology to Scale Next-Generation Data Center Architecture",
+    "date": "2026-03-02",
+    "source": "NVIDIA",
+    "url": "https://nvidianews.nvidia.com/news/nvidia-and-coherent-announce-strategic-partnership-to-develop-optics-technology-to-scale-next-generation-data-center-architecture",
+    "text": "NVIDIA and Coherent announced a strategic partnership to develop optics technology for next-generation data center architecture. NVIDIA said it would invest 2 billion dollars in Coherent to expand supply, deepen R&D and advance US-based manufacturing."
+  },
+  {
+    "id": "openai_codex_app",
+    "split": "old",
+    "title": "Introducing the Codex app",
+    "date": "2026-02-02",
+    "source": "OpenAI",
+    "url": "https://openai.com/index/introducing-the-codex-app/",
+    "text": "OpenAI introduced the Codex app for macOS as a command center for AI coding and software development. The product lets users manage multiple agents, run work in parallel and collaborate with agents over long-running tasks. A later update on March 4 said the app was also available on Windows."
+  },
+  {
+    "id": "openai_codex_spark",
+    "split": "old",
+    "title": "Introducing GPT-5.3-Codex-Spark",
+    "date": "2026-02-12",
+    "source": "OpenAI",
+    "url": "https://openai.com/index/introducing-gpt-5-3-codex-spark/",
+    "text": "OpenAI released GPT-5.3-Codex-Spark, a smaller version of GPT-5.3-Codex and its first model designed for real-time coding. The announcement said it was optimized for ultra-low latency hardware and could deliver more than 1000 tokens per second."
+  },
+  {
+    "id": "google_nano_banana_2",
+    "split": "old",
+    "title": "Nano Banana 2: Combining Pro capabilities with lightning-fast speed",
+    "date": "2026-02-26",
+    "source": "Google",
+    "url": "https://blog.google/innovation-and-ai/technology/ai/nano-banana-2/",
+    "text": "Google announced Nano Banana 2, saying it combines Pro capabilities with lightning-fast speed. The post described advanced world knowledge and high-speed intelligence for visual generation, making rapid edits and iteration possible."
+  },
+  {
+    "id": "nvidia_meta",
+    "split": "old",
+    "title": "Meta Builds AI Infrastructure With NVIDIA",
+    "date": "2026-02-17",
+    "source": "NVIDIA",
+    "url": "https://nvidianews.nvidia.com/news/meta-builds-ai-infrastructure-with-nvidia",
+    "text": "NVIDIA announced a multiyear, multigenerational strategic partnership with Meta spanning on-premises, cloud and AI infrastructure. The summary said Meta would scale AI workloads with NVIDIA Spectrum-X Ethernet and had adopted NVIDIA Confidential Computing."
+  },
+  {
+    "id": "nvidia_6g",
+    "split": "old",
+    "title": "NVIDIA and Global Telecom Leaders Commit to Build 6G on Open and Secure AI-Native Platforms",
+    "date": "2026-02-28",
+    "source": "NVIDIA",
+    "url": "https://nvidianews.nvidia.com/news/nvidia-and-global-telecom-leaders-commit-to-build-6g-on-open-and-secure-ai-native-platforms",
+    "text": "NVIDIA said it was helping advance open, software-defined and AI-native 6G architectures. The accompanying summary noted that NVIDIA is a founding member of the AI-RAN Alliance, which had over 130 participating companies driving AI-RAN innovation."
+  }
+]

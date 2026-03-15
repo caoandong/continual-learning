@@ -1,17 +1,34 @@
 [project]
-name = "continual-learning"
+name = "agent-tool-distill"
 version = "0.1.0"
-description = "Add your description here"
+description = "Minimal benchmark for distilling tool-use traces into reusable low-rank weight patches."
 readme = "README.md"
-authors = [
-    { name = "Antonio", email = "antonio@Antonios-MacBook-Air.local" }
-]
 requires-python = ">=3.13"
-dependencies = ["litellm", "pydantic>=2"]
+dependencies = [
+    "accelerate>=0.33,<2",
+    "numpy>=1.26,<3",
+    "scikit-learn>=1.5,<2",
+    "sentence-transformers>=3.0,<4",
+    "torch>=2.2,<3",
+    "transformers>=4.57,<5",
+]
+
+[project.optional-dependencies]
+quantized = [
+    "bitsandbytes>=0.43; platform_system == 'Linux'",
+]
+
+[project.scripts]
+agent-tool-distill = "agent_tool_distill:main"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = [
+    "pytest>=8.2,<9",
+]
 
 [build-system]
-requires = ["uv_build>=0.8.2,<0.9.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["agent_tool_distill"]
