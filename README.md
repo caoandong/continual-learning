@@ -317,23 +317,27 @@ Expected reading:
 - `eval_patched.json` should improve over `eval_vanilla.json` on `eval_new`
 - `eval_patched.json` should remain close to `eval_vanilla.json` on `eval_old`
 
-### Path D: Download and smoke-test `Qwen3-4B-Instruct-2507`
+### Path D: Load and smoke-test the local `Qwen3-4B-Instruct-2507` checkpoint
 
-This path downloads the non-thinking Qwen3 instruct checkpoint into a fixed local directory and runs two deterministic `transformers` smoke tests.
+This environment already has the non-thinking Qwen3 instruct checkpoint downloaded at `/content/drive/MyDrive/flair/software/qwen3/checkpoints`. Use the local inference CLI below to load it onto GPU and run two deterministic `transformers` smoke tests.
 
 ```bash
-uv run python scripts/download_and_verify_qwen3_instruct.py \
-  --checkpoint-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints
+uv run python scripts/run_qwen3_local_inference.py \
+  --checkpoint-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints \
+  --device cuda
 ```
 
 If you are using the active-environment fallback:
 
 ```bash
-uv run --active python scripts/download_and_verify_qwen3_instruct.py \
-  --checkpoint-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints
+uv run --active python scripts/run_qwen3_local_inference.py \
+  --checkpoint-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints \
+  --device cuda
 ```
 
-After the download finishes, you can also point the benchmark CLI at the local snapshot directly:
+The script prints JSON with the resolved runtime device, GPU metadata, load time, prompt latencies, and generated completions. If either smoke-test answer is wrong, it exits with an error.
+
+With the local checkpoint in place, you can also point the benchmark CLI at the snapshot directly:
 
 ```bash
 uv run agent-tool-distill evaluate \
@@ -363,4 +367,4 @@ uv run agent-tool-distill evaluate \
 - The benchmark uses static local snippets, not live web retrieval.
 - The learned patch is a static approximation of a query-dependent effect.
 - Only `up_proj` is patched by default. Extending the same mechanism to `gate_proj` is a natural next step.
-- The full model-dependent pipeline was not executed in this environment because the required model weights were not already present locally.
+- The full distillation pipeline is still expensive; the documented local verification path now confirms that the downloaded Qwen3 checkpoint loads and generates on GPU, but it does not by itself validate the entire patch-fitting workflow.
