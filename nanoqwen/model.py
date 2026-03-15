@@ -64,7 +64,7 @@ class ThoughtPatch:
         }
 
 
-def build_empty_thought_patches(model):
+def build_empty_thought_patches(model, include_bias: bool = False):
     patches = []
     for block in model.trf_blocks:
         ff = block.ff
@@ -73,7 +73,11 @@ def build_empty_thought_patches(model):
                 d_fc1=torch.zeros_like(ff.fc1.weight),
                 d_fc2=torch.zeros_like(ff.fc2.weight),
                 d_fc3=torch.zeros_like(ff.fc3.weight),
-                d_bias=torch.zeros(ff.fc3.weight.shape[0], device=ff.fc3.weight.device, dtype=ff.fc3.weight.dtype),
+                d_bias=(
+                    torch.zeros(ff.fc3.weight.shape[0], device=ff.fc3.weight.device, dtype=ff.fc3.weight.dtype)
+                    if include_bias
+                    else None
+                ),
             )
         )
     return patches

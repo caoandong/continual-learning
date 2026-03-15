@@ -28,9 +28,10 @@ from nanoqwen.model import (
 
 
 LOGGER = logging.getLogger("qwen_thought_patch")
-DEFAULT_LOCAL_CHECKPOINTS = {
-    "0.6B": Path("/Volumes/SB-XTM5/flair/software/qwen3/checkpoints/Qwen3-0.6B"),
-}
+DEFAULT_LOCAL_CHECKPOINT_ROOTS = (
+    Path("/content/drive/MyDrive/flair/software/qwen3/checkpoints"),
+    Path("/Volumes/SB-XTM5/flair/software/qwen3/checkpoints"),
+)
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,39 @@ def capture_traces(model: Qwen3Model, input_ids: torch.Tensor, *, device: str, t
     return [{key: value.detach().float().cpu() for key, value in trace.items()} for trace in traces]
 
 
+def checkpoint_dir_has_files(path: Path) -> bool:
+    return (
+        path.is_dir()
+        and (path / "tokenizer.json").exists()
+        and ((path / "model.safetensors").exists() or (path / "model.safetensors.index.json").exists())
+    )
+
+
+def resolve_local_checkpoint_dir(*, model_size: str, repo_id: str, local_dir: str | None) -> str:
+    repo_leaf = Path(repo_id).parts[-1]
+    candidates: list[Path] = []
+    if local_dir is not None:
+        requested = Path(local_dir)
+        candidates.extend([requested, requested / repo_leaf])
+    else:
+        for root in DEFAULT_LOCAL_CHECKPOINT_ROOTS:
+            candidates.extend([root / repo_leaf, root / f"Qwen3-{model_size}", root])
+        candidates.append(Path(repo_leaf))
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.expanduser()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if checkpoint_dir_has_files(resolved):
+            return str(resolved)
+
+    if local_dir is not None:
+        return str(Path(local_dir).expanduser())
+    return repo_leaf
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Thought-patching benchmark for Qwen on arithmetic instruction tasks.")
     parser.add_argument("--model-size", choices=sorted(QWEN3_CONFIGS), default="0.6B")
@@ -109,7 +143,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=1.0, help="Patch scale multiplier applied to each learned update.")
     parser.add_argument("--max-new-tokens", type=int, default=32)
     parser.add_argument("--fit-mode", choices=["sequential", "layer_batch"], default="layer_batch")
-    parser.add_argument("--patch-fc3", action="store_true", default=False, help="Also solve a down-projection update. Disabled by default because the exact skip-connection theorem only needs first-layer matrices plus a bias-like shift.")
+    parser.add_argument(
+        "--patch-fc3",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Solve the down-projection update. Enabled by default because Qwen has no native MLP output bias, so the paper-grounded path absorbs the output-side shift into fc3.",
+    )
+    parser.add_argument(
+        "--patch-output-bias",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Debug ablation: add a synthetic output bias instead of relying on fc3 to absorb the full output-side shift.",
+    )
     parser.set_defaults(eval_every_step=True)
     parser.add_argument("--no-step-eval", action="store_false", dest="eval_every_step")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -126,13 +171,21 @@ def configure_logging(level: str) -> None:
 
 
 def resolve_device(name: str) -> str:
-    if name != "auto":
-        return name
-    if torch.cuda.is_available():
-        return "cuda"
-    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
+    if name == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+    if name == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested, but no CUDA device is available.")
+    if name == "mps" and (
+        getattr(torch.backends, "mps", None) is None or not torch.backends.mps.is_available()
+    ):
+        raise RuntimeError("MPS was requested, but no MPS device is available.")
+    if name not in {"cpu", "cuda", "mps"}:
+        raise ValueError(f"Unsupported device: {name}")
+    return name
 
 
 def resolve_dtype(name: str, device: str) -> torch.dtype:
@@ -161,9 +214,7 @@ def build_model(
     is_base = model_type == "base"
     if repo_id is None:
         repo_id = f"Qwen/Qwen3-{model_size}-Base" if is_base else f"Qwen/Qwen3-{model_size}"
-    if local_dir is None:
-        default_local_dir = DEFAULT_LOCAL_CHECKPOINTS.get(model_size)
-        local_dir = str(default_local_dir) if default_local_dir is not None and default_local_dir.exists() else Path(repo_id).parts[-1]
+    local_dir = resolve_local_checkpoint_dir(model_size=model_size, repo_id=repo_id, local_dir=local_dir)
     LOGGER.info("Loading model: repo=%s local_dir=%s device=%s dtype=%s", repo_id, local_dir, device, str(dtype).replace("torch.", ""))
     start = time.perf_counter()
     model, tokenizer = load_model_and_tokenizer(
@@ -202,6 +253,18 @@ def solve_weight_update(src: torch.Tensor, target: torch.Tensor, rho: float) -> 
 
     solution = torch.linalg.lstsq(src32, tgt32).solution
     return solution.T.contiguous()
+
+
+def compute_fc3_target(
+    *,
+    ctx_mlp_out: torch.Tensor,
+    raw_mlp_out: torch.Tensor,
+    dz: torch.Tensor,
+    use_output_bias: bool,
+) -> torch.Tensor:
+    if use_output_bias:
+        return ctx_mlp_out - raw_mlp_out
+    return (ctx_mlp_out + dz) - raw_mlp_out
 
 
 def sample_examples(task_slug: str, *, train_examples: int, eval_examples: int, seed: int, digit_min: int, digit_max: int) -> Dict[str, List[ArithmeticExample]]:
@@ -360,6 +423,10 @@ def normalize_prediction(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def contains_expected_integer(text: str, answer_text: str) -> bool:
+    return re.search(rf"(?<!\d){re.escape(answer_text)}(?!\d)", text) is not None
+
+
 @torch.no_grad()
 def generate_answer(
     model: Qwen3Model,
@@ -391,6 +458,66 @@ def generate_answer(
     }
 
 
+@torch.no_grad()
+def evaluate_teacher_forced_examples(
+    model: Qwen3Model,
+    tokenizer: Any,
+    thought_patches,
+    examples: Sequence[ArithmeticExample],
+    task: TaskSpec,
+    *,
+    device: str,
+    mode: str,
+) -> Dict[str, Any]:
+    if mode not in {"prompted", "raw", "patched"}:
+        raise ValueError(f"Unsupported eval mode: {mode}")
+
+    rows = []
+    total_tokens = 0
+    correct_tokens = 0
+    exact_sequences = 0
+    total_logprob = 0.0
+
+    for index, example in enumerate(examples):
+        user_text = task.contextual_prompt(example) if mode == "prompted" else example.raw_query
+        full_ids, answer_positions = build_teacher_forcing_example(tokenizer, user_text, str(example.answer))
+        answer_token_ids = full_ids[0, answer_positions].clone().long()
+        prediction_positions = [position - 1 for position in answer_positions]
+        input_ids = full_ids[:, :-1].to(device)
+        logits = model(input_ids, thought_patches=thought_patches if mode == "patched" else None)
+        answer_logits = logits[0, prediction_positions, :].float().cpu()
+        answer_log_probs = torch.log_softmax(answer_logits, dim=-1)
+        predicted_ids = answer_logits.argmax(dim=-1)
+        matches = predicted_ids.eq(answer_token_ids)
+        token_logprobs = answer_log_probs.gather(1, answer_token_ids.unsqueeze(1)).squeeze(1)
+
+        token_count = int(answer_token_ids.numel())
+        total_tokens += token_count
+        correct_tokens += int(matches.sum().item())
+        exact_sequences += int(bool(matches.all().item()))
+        total_logprob += float(token_logprobs.sum().item())
+
+        rows.append(
+            {
+                "index": index,
+                "query": example.raw_query,
+                "expected": str(example.answer),
+                "answer_token_count": token_count,
+                "token_accuracy": 100.0 * float(matches.float().mean().item()),
+                "sequence_exact": bool(matches.all().item()),
+                "avg_logprob": float(token_logprobs.mean().item()),
+            }
+        )
+
+    return {
+        "mode": mode,
+        "token_accuracy": 100.0 * correct_tokens / max(total_tokens, 1),
+        "sequence_accuracy": 100.0 * exact_sequences / max(len(examples), 1),
+        "avg_logprob": total_logprob / max(total_tokens, 1),
+        "rows": rows,
+    }
+
+
 def evaluate_examples(
     model: Qwen3Model,
     tokenizer: Any,
@@ -406,6 +533,9 @@ def evaluate_examples(
         raise ValueError(f"Unsupported eval mode: {mode}")
     rows = []
     correct = 0
+    contains_expected = 0
+    formatting_failures = 0
+    arithmetic_failures = 0
     total_tokens = 0
     total_time = 0.0
     for index, example in enumerate(examples):
@@ -420,7 +550,11 @@ def evaluate_examples(
         )
         answer_text = str(example.answer)
         is_correct = pred["normalized"] == answer_text
+        has_expected_integer = contains_expected_integer(pred["raw_text"], answer_text)
         correct += int(is_correct)
+        contains_expected += int(has_expected_integer)
+        formatting_failures += int((not is_correct) and has_expected_integer)
+        arithmetic_failures += int((not is_correct) and (not has_expected_integer))
         total_tokens += pred["new_tokens"]
         total_time += pred["elapsed_s"]
         rows.append(
@@ -430,7 +564,9 @@ def evaluate_examples(
                 "expected": answer_text,
                 "prediction": pred["raw_text"],
                 "normalized_prediction": pred["normalized"],
+                "contains_expected_integer": has_expected_integer,
                 "correct": is_correct,
+                "failure_mode": "exact" if is_correct else ("formatting" if has_expected_integer else "arithmetic"),
                 "latency_s": round(pred["elapsed_s"], 4),
                 "new_tokens": pred["new_tokens"],
             }
@@ -441,6 +577,9 @@ def evaluate_examples(
     return {
         "mode": mode,
         "accuracy": accuracy,
+        "contains_expected_accuracy": 100.0 * contains_expected / max(len(examples), 1),
+        "formatting_failure_rate": 100.0 * formatting_failures / max(len(examples), 1),
+        "arithmetic_failure_rate": 100.0 * arithmetic_failures / max(len(examples), 1),
         "avg_latency_s": avg_latency,
         "avg_new_tokens": avg_new_tokens,
         "rows": rows,
@@ -459,6 +598,7 @@ def fit_one_example(
     rho: float,
     alpha: float,
     patch_fc3: bool,
+    patch_output_bias: bool,
 ) -> None:
     answer_text = str(example.answer)
     ctx_ids, ctx_pos = build_alignment_positions(tokenizer, task.contextual_prompt(example), example.raw_query, answer_text)
@@ -481,14 +621,19 @@ def fit_one_example(
         w2 = (block.ff.fc2.weight.detach() + patch.d_fc2.detach().to(block.ff.fc2.weight.device, dtype=block.ff.fc2.weight.dtype)).float().cpu()
         target_fc1 = dz @ w1.T
         target_fc2 = dz @ w2.T
-        target_fc3 = d_ctx - d
+        target_fc3 = compute_fc3_target(
+            ctx_mlp_out=d_ctx,
+            raw_mlp_out=d,
+            dz=dz,
+            use_output_bias=patch_output_bias,
+        )
 
         d_fc1 = solve_weight_update(a, target_fc1, rho)
         d_fc2 = solve_weight_update(a, target_fc2, rho)
         scale = learning_rate * alpha
         patch.d_fc1.add_(scale * d_fc1.to(device=patch.d_fc1.device, dtype=patch.d_fc1.dtype))
         patch.d_fc2.add_(scale * d_fc2.to(device=patch.d_fc2.device, dtype=patch.d_fc2.dtype))
-        if patch.d_bias is not None:
+        if patch_output_bias and patch.d_bias is not None:
             patch.d_bias.add_(scale * db.to(device=patch.d_bias.device, dtype=patch.d_bias.dtype))
         if patch_fc3:
             d_fc3 = solve_weight_update(h, target_fc3, rho)
@@ -507,6 +652,7 @@ def fit_layer_batch(
     rho: float,
     alpha: float,
     patch_fc3: bool,
+    patch_output_bias: bool,
 ) -> None:
     prepared = []
     for example in examples:
@@ -557,11 +703,16 @@ def fit_layer_batch(
 
         patch.d_fc1.add_(scale * d_fc1.to(device=patch.d_fc1.device, dtype=patch.d_fc1.dtype))
         patch.d_fc2.add_(scale * d_fc2.to(device=patch.d_fc2.device, dtype=patch.d_fc2.dtype))
-        if patch.d_bias is not None:
+        if patch_output_bias and patch.d_bias is not None:
             patch.d_bias.add_(scale * db.to(device=patch.d_bias.device, dtype=patch.d_bias.dtype))
 
         if patch_fc3:
-            target_fc3 = d_ctx - d
+            target_fc3 = compute_fc3_target(
+                ctx_mlp_out=d_ctx,
+                raw_mlp_out=d,
+                dz=dz,
+                use_output_bias=patch_output_bias,
+            )
             d_fc3 = solve_weight_update(h, target_fc3, rho)
             patch.d_fc3.add_(scale * d_fc3.to(device=patch.d_fc3.device, dtype=patch.d_fc3.dtype))
 
@@ -616,6 +767,7 @@ def task_seed_run(
     eval_every_step: bool,
     fit_mode: str,
     patch_fc3: bool,
+    patch_output_bias: bool,
     seed_index: int,
 ) -> Dict[str, Any]:
     reset_patches(thought_patches)
@@ -651,12 +803,32 @@ def task_seed_run(
         max_new_tokens=max_new_tokens,
         mode="raw",
     )
+    baseline_prompted_teacher_forced = evaluate_teacher_forced_examples(
+        model,
+        tokenizer,
+        thought_patches,
+        eval_examples,
+        task,
+        device=device,
+        mode="prompted",
+    )
+    baseline_raw_teacher_forced = evaluate_teacher_forced_examples(
+        model,
+        tokenizer,
+        thought_patches,
+        eval_examples,
+        task,
+        device=device,
+        mode="raw",
+    )
     LOGGER.info(
-        "[%s seed=%d] baseline eval prompted=%.2f%% raw=%.2f%%",
+        "[%s seed=%d] baseline eval prompted=%.2f%% raw=%.2f%% prompted_tf=%.2f%% raw_tf=%.2f%%",
         task.slug,
         seed_index,
         baseline_prompted["accuracy"],
         baseline_raw["accuracy"],
+        baseline_prompted_teacher_forced["sequence_accuracy"],
+        baseline_raw_teacher_forced["sequence_accuracy"],
     )
 
     step_history: List[Dict[str, Any]] = []
@@ -676,6 +848,7 @@ def task_seed_run(
                 rho=rho,
                 alpha=alpha,
                 patch_fc3=patch_fc3,
+                patch_output_bias=patch_output_bias,
             )
         elif fit_mode == "layer_batch":
             fit_layer_batch(
@@ -689,6 +862,7 @@ def task_seed_run(
                 rho=rho,
                 alpha=alpha,
                 patch_fc3=patch_fc3,
+                patch_output_bias=patch_output_bias,
             )
         else:
             raise ValueError(f"Unsupported fit_mode: {fit_mode}")
@@ -769,13 +943,25 @@ def task_seed_run(
         max_new_tokens=max_new_tokens,
         mode="patched",
     )
+    final_patched_eval_teacher_forced = evaluate_teacher_forced_examples(
+        model,
+        tokenizer,
+        thought_patches,
+        eval_examples,
+        task,
+        device=device,
+        mode="patched",
+    )
     best_eval = max(best_eval, final_patched_eval["accuracy"])
     LOGGER.info(
-        "[%s seed=%d] final patched train=%.2f%% eval=%.2f%% best_eval=%.2f%% fit_time=%.1fs",
+        "[%s seed=%d] final patched train=%.2f%% eval=%.2f%% contains=%.2f%% tf_seq=%.2f%% tf_tok=%.2f%% best_eval=%.2f%% fit_time=%.1fs",
         task.slug,
         seed_index,
         final_patched_train["accuracy"],
         final_patched_eval["accuracy"],
+        final_patched_eval["contains_expected_accuracy"],
+        final_patched_eval_teacher_forced["sequence_accuracy"],
+        final_patched_eval_teacher_forced["token_accuracy"],
         best_eval,
         total_fit_time,
     )
@@ -811,8 +997,11 @@ def task_seed_run(
         "eval_examples": [asdict(example) for example in eval_examples],
         "baseline_prompted_eval": baseline_prompted,
         "baseline_raw_eval": baseline_raw,
+        "baseline_prompted_teacher_forced_eval": baseline_prompted_teacher_forced,
+        "baseline_raw_teacher_forced_eval": baseline_raw_teacher_forced,
         "final_patched_train": final_patched_train,
         "final_patched_eval": final_patched_eval,
+        "final_patched_teacher_forced_eval": final_patched_eval_teacher_forced,
         "best_patched_eval_accuracy": best_eval,
         "fit_time_s": total_fit_time,
         "step_history": step_history,
@@ -820,7 +1009,7 @@ def task_seed_run(
     }
 
 
-def build_final_tables(results: Sequence[Dict[str, Any]]) -> tuple[str, str]:
+def build_final_tables(results: Sequence[Dict[str, Any]]) -> tuple[str, str, str]:
     seed_rows = []
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for result in results:
@@ -838,6 +1027,7 @@ def build_final_tables(results: Sequence[Dict[str, Any]]) -> tuple[str, str]:
         )
 
     aggregate_rows = []
+    diagnostic_rows = []
     for task_slug, task_results in grouped.items():
         title = task_results[0]["task_title"]
         prompted_values = [row["baseline_prompted_eval"]["accuracy"] for row in task_results]
@@ -851,6 +1041,19 @@ def build_final_tables(results: Sequence[Dict[str, Any]]) -> tuple[str, str]:
                 metric_pm(patched_values),
             ]
         )
+        patched_contains_values = [row["final_patched_eval"]["contains_expected_accuracy"] for row in task_results]
+        patched_tf_seq_values = [row["final_patched_teacher_forced_eval"]["sequence_accuracy"] for row in task_results]
+        patched_tf_tok_values = [row["final_patched_teacher_forced_eval"]["token_accuracy"] for row in task_results]
+        patched_tf_logprob_values = [row["final_patched_teacher_forced_eval"]["avg_logprob"] for row in task_results]
+        diagnostic_rows.append(
+            [
+                title,
+                metric_pm(patched_contains_values),
+                metric_pm(patched_tf_seq_values),
+                metric_pm(patched_tf_tok_values),
+                metric_pm(patched_tf_logprob_values),
+            ]
+        )
 
     seed_table = render_table(
         ["Task", "Seed", "Original w/ context", "Original w/o context", "Patched w/o context", "Best patched", "Fit time s"],
@@ -860,7 +1063,11 @@ def build_final_tables(results: Sequence[Dict[str, Any]]) -> tuple[str, str]:
         ["Task", "Original model w/ context", "Original model w/o context", "Patched model w/o context"],
         aggregate_rows,
     )
-    return seed_table, aggregate_table
+    diagnostic_table = render_table(
+        ["Task", "Patched contains answer", "Patched TF seq", "Patched TF token", "Patched TF avg logprob"],
+        diagnostic_rows,
+    )
+    return seed_table, aggregate_table, diagnostic_table
 
 
 def main() -> None:
@@ -874,13 +1081,15 @@ def main() -> None:
         raise SystemExit(f"Unknown tasks: {', '.join(unknown_tasks)}")
 
     LOGGER.info(
-        "Starting thought-patching benchmark: tasks=%s seeds=%d train=%d eval=%d device=%s dtype=%s",
+        "Starting thought-patching benchmark: tasks=%s seeds=%d train=%d eval=%d device=%s dtype=%s patch_fc3=%s patch_output_bias=%s",
         task_names,
         args.seeds,
         args.train_examples,
         args.eval_examples,
         device,
         str(dtype).replace("torch.", ""),
+        args.patch_fc3,
+        args.patch_output_bias,
     )
 
     model, tokenizer, repo_id, local_dir = build_model(
@@ -891,7 +1100,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
     )
-    thought_patches = build_empty_thought_patches(model)
+    thought_patches = build_empty_thought_patches(model, include_bias=args.patch_output_bias)
 
     all_results: List[Dict[str, Any]] = []
     wall_start = time.perf_counter()
@@ -925,11 +1134,12 @@ def main() -> None:
                 eval_every_step=args.eval_every_step,
                 fit_mode=args.fit_mode,
                 patch_fc3=args.patch_fc3,
+                patch_output_bias=args.patch_output_bias,
                 seed_index=seed_index,
             )
             all_results.append(result)
 
-    seed_table, aggregate_table = build_final_tables(all_results)
+    seed_table, aggregate_table, diagnostic_table = build_final_tables(all_results)
     total_elapsed = time.perf_counter() - wall_start
 
     print()
@@ -938,6 +1148,9 @@ def main() -> None:
     print()
     print("Paper-style summary")
     print(aggregate_table)
+    print()
+    print("Diagnostic summary")
+    print(diagnostic_table)
 
     serializable_args = {}
     for key, value in vars(args).items():

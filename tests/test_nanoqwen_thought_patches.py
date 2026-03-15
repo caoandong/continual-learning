@@ -36,6 +36,15 @@ def test_build_empty_thought_patches_match_model_shapes():
         assert patch.d_fc1.shape == block.ff.fc1.weight.shape
         assert patch.d_fc2.shape == block.ff.fc2.weight.shape
         assert patch.d_fc3.shape == block.ff.fc3.weight.shape
+        assert patch.d_bias is None
+
+
+def test_build_empty_thought_patches_can_enable_debug_bias():
+    model = Qwen3Model(tiny_cfg())
+    patches = build_empty_thought_patches(model, include_bias=True)
+
+    for patch, block in zip(patches, model.trf_blocks):
+        assert patch.d_bias is not None
         assert patch.d_bias.shape == (block.ff.fc3.weight.shape[0],)
 
 
@@ -55,6 +64,18 @@ def test_nonzero_patch_changes_logits():
     model = Qwen3Model(tiny_cfg())
     input_ids = torch.randint(0, 64, (1, 5))
     patches = build_empty_thought_patches(model)
+    patches[0].d_fc3[0, 0] += 0.25
+
+    base_logits = model(input_ids)
+    patched_logits = model(input_ids, thought_patches=patches)
+
+    assert not torch.allclose(base_logits, patched_logits)
+
+
+def test_debug_bias_patch_changes_logits():
+    model = Qwen3Model(tiny_cfg())
+    input_ids = torch.randint(0, 64, (1, 5))
+    patches = build_empty_thought_patches(model, include_bias=True)
     patches[0].d_bias += 0.25
 
     base_logits = model(input_ids)

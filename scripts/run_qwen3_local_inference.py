@@ -90,6 +90,29 @@ def model_kwargs_for_device(device: str) -> dict[str, object]:
     return kwargs
 
 
+def checkpoint_dir_has_files(checkpoint_dir: Path) -> bool:
+    return checkpoint_dir.is_dir() and (checkpoint_dir / "config.json").exists() and any(
+        (checkpoint_dir / filename).exists()
+        for filename in ("model.safetensors", "model.safetensors.index.json", "pytorch_model.bin")
+    )
+
+
+def resolve_checkpoint_dir(checkpoint_dir: Path) -> Path:
+    if checkpoint_dir_has_files(checkpoint_dir):
+        return checkpoint_dir
+    child_candidates = sorted(
+        child for child in checkpoint_dir.iterdir() if child.is_dir() and checkpoint_dir_has_files(child)
+    )
+    if len(child_candidates) == 1:
+        return child_candidates[0]
+    if len(child_candidates) > 1:
+        raise RuntimeError(
+            "Checkpoint directory is ambiguous. Pass --checkpoint-dir pointing at one model snapshot. "
+            f"Candidates: {', '.join(str(path) for path in child_candidates)}"
+        )
+    return checkpoint_dir
+
+
 def normalize_device_placement(placement: object) -> str | None:
     if isinstance(placement, int):
         return f"cuda:{placement}"
@@ -239,6 +262,7 @@ def main() -> None:
     checkpoint_dir = args.checkpoint_dir.resolve()
     if not checkpoint_dir.exists():
         raise FileNotFoundError(f"Checkpoint directory does not exist: {checkpoint_dir}")
+    checkpoint_dir = resolve_checkpoint_dir(checkpoint_dir)
 
     resolved_device = resolve_device(args.device)
     cases = build_cases(args.prompts)

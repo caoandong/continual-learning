@@ -68,3 +68,15 @@ def test_assert_expected_raises_on_missing_substring():
 
     with pytest.raises(RuntimeError, match="Smoke test failed"):
         script.assert_expected(case, "five")
+
+
+def test_resolve_checkpoint_dir_prefers_single_snapshot_child(tmp_path: Path):
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint_dir = checkpoint_root / "Qwen3-0.6B"
+    checkpoint_dir.mkdir(parents=True)
+    (checkpoint_dir / "config.json").write_text("{}")
+    (checkpoint_dir / "model.safetensors").write_text("stub")
+
+    resolved = script.resolve_checkpoint_dir(checkpoint_root)
+
+    assert resolved == checkpoint_dir

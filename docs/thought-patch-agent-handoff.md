@@ -13,7 +13,7 @@ Make the arithmetic thought-patching benchmark in `qwen_thought_patch_cli.py` as
 
 and then run a principled end-to-end benchmark on the local `Qwen3-0.6B` checkpoint at:
 
-- `/Volumes/SB-XTM5/flair/software/qwen3/checkpoints/Qwen3-0.6B`
+- `/content/drive/MyDrive/flair/software/qwen3/checkpoints/Qwen3-0.6B`
 
 Success means:
 
@@ -29,12 +29,12 @@ Do not claim `100%` unless the run actually achieves it.
 
 ## Files that matter
 
-- `/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py`
-- `/Volumes/SB-XTM5/flair/software/continual-learning/qwen_thought_patch_cli.py`
-- `/Volumes/SB-XTM5/flair/software/continual-learning/tests/test_nanoqwen_thought_patches.py`
-- `/Volumes/SB-XTM5/flair/software/continual-learning/tests/test_qwen_thought_patch_cli.py`
-- `/Volumes/SB-XTM5/flair/software/continual-learning/docs/readable-log.md`
-- `/Volumes/SB-XTM5/flair/software/continual-learning/docs/thought-patching-qwen.md`
+- `/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py`
+- `/content/drive/MyDrive/flair/software/continual-learning/qwen_thought_patch_cli.py`
+- `/content/drive/MyDrive/flair/software/continual-learning/tests/test_nanoqwen_thought_patches.py`
+- `/content/drive/MyDrive/flair/software/continual-learning/tests/test_qwen_thought_patch_cli.py`
+- `/content/drive/MyDrive/flair/software/continual-learning/docs/readable-log.md`
+- `/content/drive/MyDrive/flair/software/continual-learning/docs/thought-patching-qwen.md`
 
 ## Current known state
 
@@ -47,7 +47,7 @@ Existing completed runs show:
 
 The strongest run is:
 
-- `/Volumes/SB-XTM5/flair/software/continual-learning/runs/qwen_thought_patch_multiply_filtered_batch.json`
+- `/content/drive/MyDrive/flair/software/continual-learning/runs/qwen_thought_patch_multiply_filtered_batch.json`
 
 The main known bottleneck is that the current Qwen implementation still relies on a synthetic output-side `d_bias`, while the paper-grounded no-bias adaptation should absorb the thought vector into the output projection.
 
@@ -265,7 +265,8 @@ Command shape:
 python3 qwen_thought_patch_cli.py \
   --model-size 0.6B \
   --model-type instruct \
-  --local-dir /Volumes/SB-XTM5/flair/software/qwen3/checkpoints/Qwen3-0.6B \
+  --device cuda \
+  --local-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints/Qwen3-0.6B \
   --tasks multiply \
   --train-examples 10 \
   --eval-examples 20 \
@@ -534,8 +535,8 @@ The task is complete when all of the following are true:
 
 When you finish, update:
 
-- `/Volumes/SB-XTM5/flair/software/continual-learning/docs/readable-log.md`
-- `/Volumes/SB-XTM5/flair/software/continual-learning/docs/thought-patching-qwen.md`
+- `/content/drive/MyDrive/flair/software/continual-learning/docs/readable-log.md`
+- `/content/drive/MyDrive/flair/software/continual-learning/docs/thought-patching-qwen.md`
 
 and include:
 

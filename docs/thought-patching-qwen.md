@@ -5,13 +5,13 @@ This note reviews:
 - `transmuting-prompts-into-weights.pdf`
 - `learning-without-training.pdf`
 
-and turns the core algorithm into a concrete implementation plan for the Qwen model in [`nanoqwen/model.py`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py).
+and turns the core algorithm into a concrete implementation plan for the Qwen model in [`nanoqwen/model.py`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py).
 
 ## Runnable CLI
 
 The repository now includes a standalone runnable script:
 
-- [`qwen_thought_patch_cli.py`](/Volumes/SB-XTM5/flair/software/continual-learning/qwen_thought_patch_cli.py)
+- [`qwen_thought_patch_cli.py`](/content/drive/MyDrive/flair/software/continual-learning/qwen_thought_patch_cli.py)
 
 It does the full end-to-end loop:
 
@@ -24,7 +24,7 @@ It does the full end-to-end loop:
 
 The CLI uses the local 0.6B checkpoint by default when it exists at:
 
-- `/Volumes/SB-XTM5/flair/software/qwen3/checkpoints/Qwen3-0.6B`
+- `/content/drive/MyDrive/flair/software/qwen3/checkpoints/Qwen3-0.6B`
 
 Recommended first run:
 
@@ -32,6 +32,8 @@ Recommended first run:
 uv run python qwen_thought_patch_cli.py \
   --model-size 0.6B \
   --model-type instruct \
+  --device cuda \
+  --local-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints \
   --tasks multiply,sum \
   --train-examples 10 \
   --eval-examples 20 \
@@ -48,6 +50,8 @@ For a paper-style average over multiple random seeds:
 uv run python qwen_thought_patch_cli.py \
   --model-size 0.6B \
   --model-type instruct \
+  --device cuda \
+  --local-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints \
   --tasks multiply,sum \
   --train-examples 10 \
   --eval-examples 20 \
@@ -73,18 +77,18 @@ If the contextual baseline is weak on `0.6B`, move to `1.7B`.
 
 The implementation is now native to the Qwen codepath:
 
-- [`nanoqwen/model.py`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py) supports:
+- [`nanoqwen/model.py`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py) supports:
   - `ThoughtPatch`
   - `build_empty_thought_patches(model)`
   - `model(..., thought_patches=patches, return_trace=True)`
   - patched greedy generation via `generate_text_simple(..., thought_patches=...)`
-- [`qwen_thought_patch_cli.py`](/Volumes/SB-XTM5/flair/software/continual-learning/qwen_thought_patch_cli.py) uses those native APIs directly
+- [`qwen_thought_patch_cli.py`](/content/drive/MyDrive/flair/software/continual-learning/qwen_thought_patch_cli.py) uses those native APIs directly
 
 So the document is no longer just a plan: the tracing, patch fitting, runtime patch application, CLI logging, and evaluation path are implemented.
 
 ## Observed results on local `Qwen3-0.6B`
 
-Using the local checkpoint at `/Volumes/SB-XTM5/flair/software/qwen3/checkpoints/Qwen3-0.6B`, the current implementation behaves as follows on the Table 1-style arithmetic setup with `10` training examples and `20` held-out evaluation examples:
+Using the local checkpoint at `/content/drive/MyDrive/flair/software/qwen3/checkpoints/Qwen3-0.6B`, the current implementation behaves as follows on the Table 1-style arithmetic setup with `10` training examples and `20` held-out evaluation examples:
 
 ```text
 Multiply numbers:
@@ -226,15 +230,15 @@ The paper's Algorithm 1 is the key operational recipe.
 
 ## 3. What this means for Qwen
 
-Qwen in [`nanoqwen/model.py`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py) is not a vanilla MLP block.
+Qwen in [`nanoqwen/model.py`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py) is not a vanilla MLP block.
 
 Relevant structure:
 
-- [`FeedForward`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py#L76) has:
+- [`FeedForward`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py#L76) has:
   - `fc1`: gate projection
   - `fc2`: up projection
   - `fc3`: down projection
-- [`TransformerBlock.forward`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py#L189) is:
+- [`TransformerBlock.forward`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py#L189) is:
   - attention residual
   - `norm2`
   - SwiGLU MLP
@@ -422,12 +426,12 @@ def fit_qwen_thought_patch(model, ctx_batch, raw_batch, answer_mask, rho=0.0, et
 
 ## 6. What was implemented in `nanoqwen/model.py`
 
-The required model changes are now implemented in [`nanoqwen/model.py`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py):
+The required model changes are now implemented in [`nanoqwen/model.py`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py):
 
-1. [`FeedForward.forward`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py#L120) accepts an optional thought patch and can return an internal trace.
-2. [`TransformerBlock.forward`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py#L241) accepts an optional layer patch and can return block traces.
-3. [`Qwen3Model.forward`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py#L287) accepts `thought_patches` and `return_trace=True`.
-4. [`generate_text_simple`](/Volumes/SB-XTM5/flair/software/continual-learning/nanoqwen/model.py#L592) can now generate with patched weights.
+1. [`FeedForward.forward`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py#L120) accepts an optional thought patch and can return an internal trace.
+2. [`TransformerBlock.forward`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py#L241) accepts an optional layer patch and can return block traces.
+3. [`Qwen3Model.forward`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py#L287) accepts `thought_patches` and `return_trace=True`.
+4. [`generate_text_simple`](/content/drive/MyDrive/flair/software/continual-learning/nanoqwen/model.py#L592) can now generate with patched weights.
 5. Local checkpoint loading is supported directly when `tokenizer.json` and `model.safetensors` already exist in a local directory.
 
 The per-layer record only needs:
@@ -452,7 +456,7 @@ This keeps the base Qwen checkpoint intact while making the paper's thought patc
 
 ## 7. Relation to the existing code in this repo
 
-[`agent_tool_distill.py`](/Volumes/SB-XTM5/flair/software/continual-learning/agent_tool_distill.py#L1016) already implements the simpler rank-1 approximation:
+[`agent_tool_distill.py`](/content/drive/MyDrive/flair/software/continual-learning/agent_tool_distill.py#L1016) already implements the simpler rank-1 approximation:
 
 ```text
 delta_a = a_teacher - a_vanilla
@@ -472,7 +476,7 @@ So it is a good baseline, but not yet the paper's full algorithm for Qwen.
 
 ## 8. Recommended implementation order
 
-1. Run [`qwen_thought_patch_cli.py`](/Volumes/SB-XTM5/flair/software/continual-learning/qwen_thought_patch_cli.py) on `multiply` first.
+1. Run [`qwen_thought_patch_cli.py`](/content/drive/MyDrive/flair/software/continual-learning/qwen_thought_patch_cli.py) on `multiply` first.
 2. Inspect the per-step table and make sure patched eval accuracy rises while the contextual baseline stays strong.
 3. Then run both `multiply,sum`.
 4. Only after that, try more open-ended tasks like translation or new knowledge injection.
