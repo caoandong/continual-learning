@@ -277,6 +277,11 @@ def is_qwen3_model(model_name: str) -> bool:
     return "qwen3" in model_name.lower()
 
 
+def is_qwen3_instruct_2507_model(model_name: str) -> bool:
+    lowered = model_name.lower()
+    return "qwen3" in lowered and "instruct-2507" in lowered
+
+
 def chunk_text(text: str, words_per_chunk: int = 120, overlap: int = 30) -> List[str]:
     words = text.split()
     if len(words) <= words_per_chunk:
@@ -600,6 +605,23 @@ def assistant_message_for_history(response: AssistantResponse) -> Dict[str, Any]
 
 
 def resolve_generation_kwargs(model_name: str, runtime: RuntimeConfig) -> Dict[str, Any]:
+    if is_qwen3_instruct_2507_model(model_name):
+        if runtime.reasoning_mode != "non_thinking":
+            raise ValueError(
+                f"{model_name} is a non-thinking Qwen3 Instruct checkpoint; "
+                "use --reasoning-mode non_thinking."
+            )
+        kwargs = {
+            "do_sample": True,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "max_new_tokens": runtime.max_new_tokens or 512,
+        }
+        if runtime.temperature is not None:
+            kwargs["temperature"] = runtime.temperature
+        return kwargs
+
     if is_qwen3_model(model_name):
         presets = {
             "non_thinking": {

@@ -3,7 +3,7 @@ name = "agent-tool-distill"
 version = "0.1.0"
 description = "Minimal benchmark for distilling tool-use traces into reusable low-rank weight patches."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "accelerate>=0.33,<2",
     "numpy>=1.26,<3",

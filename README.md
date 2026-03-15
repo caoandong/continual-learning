@@ -97,6 +97,7 @@ Important implementation details:
 - Retrieval defaults to TF-IDF, so the corpus build is fully offline and reproducible.
 - The default model is `Qwen/Qwen3-1.7B`, and the default ablation ladder is `Qwen/Qwen3-{0.6B,1.7B,4B,8B}`.
 - Qwen3 runs support `--reasoning-mode non_thinking` and `--reasoning-mode thinking`; scores and patch fitting use the final visible answer text, while raw thinking text is kept only in trace metadata.
+- `Qwen/Qwen3-*-Instruct-2507` checkpoints are non-thinking only, so run them with `--reasoning-mode non_thinking` and do not pass `enable_thinking`.
 - The default teacher is `guided`, which always performs one deterministic search before answering.
 - `auto` teacher mode is more agentic and uses a lightweight function-calling loop around `search_news` and `read_doc`, with Qwen-compatible tool-call parsing.
 - The patch targets `layer.mlp.up_proj` by default because it is the cleanest single-matrix analogue of the first MLP transform in Llama-like models.
@@ -140,7 +141,7 @@ The repository now includes a root [`pyproject.toml`](pyproject.toml), so you ca
 ### Prerequisites
 
 - `uv` installed
-- Python `3.13` available locally, matching the existing [`.python-version`](.python-version)
+- Python `3.12` available locally, matching the existing [`.python-version`](.python-version)
 - Enough memory for the Qwen3 checkpoint you select; the default sweep targets `0.6B`, `1.7B`, `4B`, and `8B`
 - Network access to download model weights from Hugging Face the first time you run a model command
 
@@ -155,7 +156,7 @@ The repository now includes a root [`pyproject.toml`](pyproject.toml), so you ca
 2. Install the pinned Python version if needed:
 
    ```bash
-   uv python install 3.13
+   uv python install 3.12
    ```
 
 3. Create or sync the virtual environment and install dependencies:
@@ -189,7 +190,7 @@ If the repository lives on a macOS external volume and `uv sync` fails with `._*
 This was the setup path verified in this environment.
 
 ```bash
-uv venv "$HOME/.venvs/continual-learning" --python 3.13
+uv venv "$HOME/.venvs/continual-learning" --python 3.12
 source "$HOME/.venvs/continual-learning/bin/activate"
 uv sync --active
 uv run --active agent-tool-distill --help
@@ -199,6 +200,8 @@ If you use this fallback, then for the rest of the commands below either:
 
 - keep using `uv run --active agent-tool-distill ...`, or
 - activate the environment once and run `agent-tool-distill ...` directly
+
+This Linux CUDA environment was verified with Python `3.12.12`. The previously pinned Python `3.13` path hit a `torch` import bus error here, so the default project pin now targets Python `3.12`.
 
 ## Step-By-Step: How To Run The Code
 
@@ -314,11 +317,28 @@ Expected reading:
 - `eval_patched.json` should improve over `eval_vanilla.json` on `eval_new`
 - `eval_patched.json` should remain close to `eval_vanilla.json` on `eval_old`
 
+### Path D: Download and smoke-test `Qwen3-4B-Instruct-2507`
+
+This path downloads the non-thinking Qwen3 instruct checkpoint into a fixed local directory and runs two deterministic `transformers` smoke tests.
+
+```bash
+uv run python scripts/download_and_verify_qwen3_instruct.py \
+  --checkpoint-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints
+```
+
+If you are using the active-environment fallback:
+
+```bash
+uv run --active python scripts/download_and_verify_qwen3_instruct.py \
+  --checkpoint-dir /content/drive/MyDrive/flair/software/qwen3/checkpoints
+```
+
 ## Practical Knobs
 
 - Use `--teacher-mode guided` for reproducibility.
 - Use `--teacher-mode auto` if you want the model to decide when to call `search_news` or `read_doc`.
 - Use `--reasoning-mode` to switch between explicit Qwen3 `non_thinking` and `thinking` profiles.
+- Keep `Qwen/Qwen3-*-Instruct-2507` on `--reasoning-mode non_thinking`; those checkpoints are not thinking-enabled.
 - Use `--rank` to control patch capacity.
 - Use `--alpha` to scale the patch strength at inference time.
 - Use `--layers` to choose where the patch is injected.
