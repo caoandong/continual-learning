@@ -29,6 +29,7 @@ dependencies = [
     { name = "numpy" },
     { name = "scikit-learn" },
     { name = "sentence-transformers" },
+    { name = "tokenizers" },
     { name = "torch" },
     { name = "transformers" },
 ]
@@ -50,6 +51,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "scikit-learn", specifier = ">=1.5,<2" },
     { name = "sentence-transformers", specifier = ">=3.0,<4" },
+    { name = "tokenizers", specifier = ">=0.22.2" },
     { name = "torch", specifier = ">=2.2,<3" },
     { name = "transformers", specifier = ">=4.57,<5" },
 ]
