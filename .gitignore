@@ -4,6 +4,7 @@ __pycache__/
 dist/
 build/
 *.pyc
+*.zip
 .pytest_cache/
 ._*
 .env
