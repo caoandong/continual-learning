@@ -1,6 +1,0 @@
-torch>=2.2
-transformers>=4.49
-accelerate>=0.33
-numpy>=1.26
-scikit-learn>=1.5
-sentence-transformers>=3.0
