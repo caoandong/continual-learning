@@ -1,0 +1,72 @@
+{
+  "scenario_name": "extended_arith_v1",
+  "per_split": {
+    "id": {
+      "final_average_accuracy": 1.0,
+      "forward_transfer": 0.0,
+      "final_backward_transfer": 0.0,
+      "mean_max_forgetting": 0.0,
+      "zero_shot_composition": 0.0
+    },
+    "ood_length": {
+      "final_average_accuracy": 1.0,
+      "forward_transfer": 0.0,
+      "final_backward_transfer": 0.0,
+      "mean_max_forgetting": 0.0,
+      "zero_shot_composition": 0.0
+    },
+    "ood_template": {
+      "final_average_accuracy": 1.0,
+      "forward_transfer": 0.0,
+      "final_backward_transfer": 0.0,
+      "mean_max_forgetting": 0.0,
+      "zero_shot_composition": 0.0
+    }
+  },
+  "threshold_summary": {
+    "stage_1_addition": {
+      "threshold_split": "ood_length",
+      "threshold": 0.9,
+      "continual_examples_to_threshold": 128,
+      "scratch_examples_to_threshold": 128,
+      "transfer_efficiency_gain": 1.0
+    },
+    "stage_2_multiplication": {
+      "threshold_split": "ood_length",
+      "threshold": 0.9,
+      "continual_examples_to_threshold": 128,
+      "scratch_examples_to_threshold": 128,
+      "transfer_efficiency_gain": 1.0
+    },
+    "stage_3_linear_combination": {
+      "threshold_split": "ood_length",
+      "threshold": 0.9,
+      "continual_examples_to_threshold": 128,
+      "scratch_examples_to_threshold": 128,
+      "transfer_efficiency_gain": 1.0
+    },
+    "stage_4_expression": {
+      "threshold_split": "ood_length",
+      "threshold": 0.9,
+      "continual_examples_to_threshold": 128,
+      "scratch_examples_to_threshold": 128,
+      "transfer_efficiency_gain": 1.0
+    }
+  },
+  "metadata": {
+    "scenario_description": "Extended arithmetic continual-learning track: addition -> multiplication -> linear combination -> nested expression evaluation.",
+    "base_seed": 123,
+    "stage_order": [
+      "stage_1_addition",
+      "stage_2_multiplication",
+      "stage_3_linear_combination",
+      "stage_4_expression"
+    ],
+    "tasks": [
+      "addition",
+      "multiplication",
+      "linear_combination",
+      "expression"
+    ]
+  }
+}

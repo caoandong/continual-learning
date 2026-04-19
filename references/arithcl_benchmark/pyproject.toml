@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arithcl-benchmark"
+version = "0.1.0"
+description = "Procedural benchmark for continual learning on arithmetic and compositional reasoning tasks."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "OpenAI"}]
+dependencies = []
+
+[tool.setuptools]
+packages = ["arithcl_benchmark"]

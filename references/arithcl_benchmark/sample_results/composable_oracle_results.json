@@ -1,0 +1,319 @@
+{
+  "scenario_name": "extended_arith_v1",
+  "initial_matrix": {
+    "addition": {
+      "id": 0.0,
+      "ood_length": 0.0,
+      "ood_template": 0.0
+    },
+    "multiplication": {
+      "id": 0.0,
+      "ood_length": 0.0,
+      "ood_template": 0.0
+    },
+    "linear_combination": {
+      "id": 0.0,
+      "ood_length": 0.0,
+      "ood_template": 0.0
+    },
+    "expression": {
+      "id": 0.0,
+      "ood_length": 0.0,
+      "ood_template": 0.0
+    }
+  },
+  "stage_final_matrices": [
+    {
+      "addition": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "multiplication": {
+        "id": 0.0,
+        "ood_length": 0.0,
+        "ood_template": 0.0
+      },
+      "linear_combination": {
+        "id": 0.0,
+        "ood_length": 0.0,
+        "ood_template": 0.0
+      },
+      "expression": {
+        "id": 0.0,
+        "ood_length": 0.0,
+        "ood_template": 0.0
+      }
+    },
+    {
+      "addition": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "multiplication": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "linear_combination": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "expression": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      }
+    },
+    {
+      "addition": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "multiplication": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "linear_combination": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "expression": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      }
+    },
+    {
+      "addition": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "multiplication": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "linear_combination": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      },
+      "expression": {
+        "id": 1.0,
+        "ood_length": 1.0,
+        "ood_template": 1.0
+      }
+    }
+  ],
+  "adaptation_curves": {
+    "stage_1_addition": {
+      "id": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    },
+    "stage_2_multiplication": {
+      "id": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    },
+    "stage_3_linear_combination": {
+      "id": {
+        "0": 1.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 1.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 1.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    },
+    "stage_4_expression": {
+      "id": {
+        "0": 1.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 1.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 1.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    }
+  },
+  "scratch_curves": {
+    "stage_1_addition": {
+      "id": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    },
+    "stage_2_multiplication": {
+      "id": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    },
+    "stage_3_linear_combination": {
+      "id": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    },
+    "stage_4_expression": {
+      "id": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_length": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      },
+      "ood_template": {
+        "0": 0.0,
+        "128": 1.0,
+        "256": 1.0,
+        "512": 1.0,
+        "1024": 1.0
+      }
+    }
+  },
+  "metadata": {
+    "scenario_description": "Extended arithmetic continual-learning track: addition -> multiplication -> linear combination -> nested expression evaluation.",
+    "base_seed": 123,
+    "stage_order": [
+      "stage_1_addition",
+      "stage_2_multiplication",
+      "stage_3_linear_combination",
+      "stage_4_expression"
+    ],
+    "tasks": [
+      "addition",
+      "multiplication",
+      "linear_combination",
+      "expression"
+    ]
+  }
+}
